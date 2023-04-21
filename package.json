@@ -1,0 +1,33 @@
+{
+  "name": "lmdb-objects",
+  "version": "0.0.1",
+  "description": "Higher level object operations for LMDB values, e.g. indexing",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anywhichway/lmdb-objects.git"
+  },
+  "keywords": [
+    "lmdb",
+    "index",
+    "objects"
+  ],
+  "author": "Simon Y. Blackwell",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/anywhichway/lmdb-objects/issues"
+  },
+  "homepage": "https://github.com/anywhichway/lmdb-objects#readme",
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "lmdb": "^2.7.11"
+  },
+  "dependencies": {
+    "lmdb-extend": "^1.1.1",
+    "lmdb-query": "^1.1.3"
+  }
+}
