@@ -92,8 +92,11 @@ async function remove(remove,key,ifVersion) {
     return result;
 }
 
-function *getRangeFromIndex(where,valueMatch,select,cname=where.constructor.name) {
+function *getRangeFromIndex(where,valueMatch,select,{cname=where.constructor.name,versions,offset,limit=Infinity}={}) {
+    if(limit!==undefined && typeof(limit)!=="number") throw new TypeError(`limit must be a number for getRangeWhere, got ${typeof(limit)} : ${limit}`);
     const candidates = {};
+    valueMatch ||= (value) => value;
+    select ||= (value) => value;
     let total = 0;
     Object.entries(where).forEach(([property,value],i) => {
         const vtype = typeof(value),
@@ -116,23 +119,22 @@ function *getRangeFromIndex(where,valueMatch,select,cname=where.constructor.name
     })
     const valueMatchType = typeof(valueMatch)
     for(const [key,{count,value}] of Object.entries(candidates)) {
-        if(count===total) {
-            if(select===true) {
-                if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {key,value};
-                else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {key,value};
-                else if(valueMatch===undefined) yield {key,value};
-                else if(valueMatch===value) yield {key,value};
-            } else {
-                const entry = this.getEntry(key,{versions:true}),
-                    value = entry.value,
-                    result = {key};
-                if(entry.version!==undefined) result.version = entry.version;
-                if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {...result,value:typeof(select)==="function" ? select(value) : value};
-                else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:typeof(select)==="function" ? select(value) : value};
-                else if(valueMatch===undefined) yield {...result,value:typeof(select)==="function" ? select(value) : value};
-                else if(valueMatch===value) yield {...result,value:typeof(select)==="function" ? select(value) : value};
-            }
+        if(offset && offset-->0) continue;
+        if(select===true) {
+            if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {key,value};
+            else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {key,value};
+            else if(valueMatch===undefined) yield {key,value};
+            else if(valueMatch===value) yield {key,value};
+        } else {
+            const entry = this.getEntry(key,{versions:true}),
+                value = entry.value,
+                result = {key};
+            if(entry.version!==undefined) result.version = entry.version;
+            if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {...result,value:select(value)};
+            else if(valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:select(value)};
+            else if(valueMatch===value) yield {...result,value:select(value)};
         }
+        if(--limit===0) return;
     }
 }
 

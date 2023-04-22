@@ -70,7 +70,7 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Same behavior as `lmdb` except that the index entries are removed.
 
-## async getRangeFromIndex(index,?options) - returns AsyncIterableIterator
+## async getRangeFromIndex(where,?valueMatch,?select,{cname=where.constructor.name,versions,offset,bumpIndex,count,limit=count||Infinity}=?options={}) - returns AsyncIterableIterator
 
 ## withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
 
@@ -87,6 +87,8 @@ index.js |    69.9 |    54.62 |   57.14 |   82.71 | 32-37,51,88-90,111-128
 
 
 # Release Notes (Reverse Chronological Order)
+
+2023-04-22 v0.1.0 Made API more consistent with `lmdb-query`.
 
 2023-04-22 v0.0.2 Documentation updates. Addition of `defineSchema` and UUID generation.
 
