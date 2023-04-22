@@ -1,24 +1,53 @@
-import {getRangeWhere} from "lmdb-query";
+import {getRangeWhere,matchPattern} from "lmdb-query";
+import {v4 as uuid} from "uuid";
+
+function defineSchema(ctor,options={}) {
+    // {indexKeys:["name","age"],name:"Person",idKey:"#"}
+    this.schema ||= {};
+    options.ctor = ctor;
+    this.schema[ctor.name||options.name] = options;
+}
+
+async function copy(key,destKey,overwrite,version,ifVersion) {
+    //
+}
+
+function getSchema(value) {
+    this.schema ||= {};
+    if(!value || typeof(value)!=="object") return;
+    const cname = value.constructor.name,
+        schema = this.schema[cname];
+    if(!schema) {
+        if(cname==="Object") return;
+        return this.schema[cname] = getSchema.call(this,Object.getPrototypeOf(value));
+    }
+    schema.idKey ||= "#";
+    schema.keyGenerator ||= uuid;
+    return schema;
+}
 
 async function put(put,key,value,version,ifVersion) {
     const db = this,
-        isObject = value && typeof(value),
-        doIndex = key==null && isObject;
-    key = doIndex ? (value[this.idKey||"#"] ||= Math.random())+"" : key;
-    if(doIndex) {
+        schema = getSchema.call(db,value);
+    if(schema) {
+        value[schema.idKey] ||= key || schema.keyGenerator();
+        value[schema.idKey]+="";
+        if(key!=null && key!==value[schema.idKey]) throw new Error(`Key ${key} does not match id ${schema.idKey}:${value[schema.idKey]}`);
+        key = value[schema.idKey];
         const entry = this.getEntry(key);
         if(ifVersion && (!entry || (entry.version!==ifVersion))) return false;
         const cname = value.constructor.name,
             now = Date.now(),
-            schema = this.schema ? this.schema[cname] : null,
-            indexKeys = schema?.indexKeys || Object.keys(value),
-            keys = [...indexKeys.map((property) => {
+            indexKeys = schema.indexKeys || Object.keys(value),
+            keys = [...indexKeys.reduce((keys,property) => {
                 const v = value[property]!==undefined ? value[property] : null;
-                return [property,v,cname,key]
-            }),...indexKeys.map((property) => {
+                if(!v || typeof(v)!=="object") keys.push([property,v,cname,key]);
+                return keys;
+            },[]),...indexKeys.reduce((keys,property) => {
                 const v = value[property]!==undefined ? value[property] : null;
-                return [key,property,v,cname]
-            })];
+                if(!v || typeof(v)!=="object") keys.push([key,property,v,cname]);
+                return keys;
+            },[])];
         let result;
         await this.transaction(async () => {
             if(entry) {
@@ -45,7 +74,25 @@ async function put(put,key,value,version,ifVersion) {
     }
 }
 
-function *getRangeFromIndex(where,partial,cname=where.constructor.name) {
+async function remove(remove,key,ifVersion) {
+    const db = this;
+    let result;
+    await this.transaction(async () => {
+        result = await remove(key,ifVersion);
+        if(!result) return;
+        const id = key;
+        for(const {key} of getRangeWhere.call(db,[id])) {
+            if(key.length!==4) continue;
+            const [id,property,v,cname] = key;
+            if(typeof(property)!=="string" || typeof(cname)!=="string") continue;
+            await remove(key);
+            await remove([property,v,cname,id])
+        }
+    })
+    return result;
+}
+
+function *getRangeFromIndex(where,valueMatch,select,cname=where.constructor.name) {
     const candidates = {};
     let total = 0;
     Object.entries(where).forEach(([property,value],i) => {
@@ -58,22 +105,32 @@ function *getRangeFromIndex(where,partial,cname=where.constructor.name) {
             if(i===0) {
                 candidates[id] = {
                     count: 1,
-                    value: partial ? {[property]:value} : undefined
+                    value: select===true ? {[property]:key[1]} : undefined
                 };
             } else if(candidate?.count===total) {
                 candidate.count++;
-                if(partial) Object.assign(candidate.value,{[property]:value})
+                if(select===true) Object.assign(candidate.value,{[property]:key[1]})
             }
         }
         total++;
     })
+    const valueMatchType = typeof(valueMatch)
     for(const [key,{count,value}] of Object.entries(candidates)) {
         if(count===total) {
-            if(partial) {
-                yield {key,value};
+            if(select===true) {
+                if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {key,value};
+                else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {key,value};
+                else if(valueMatch===undefined) yield {key,value};
+                else if(valueMatch===value) yield {key,value};
             } else {
-                const entry = this.getEntry(key,{versions:true});
-                if(entry) yield {key,...entry}
+                const entry = this.getEntry(key,{versions:true}),
+                    value = entry.value,
+                    result = {key};
+                if(entry.version!==undefined) result.version = entry.version;
+                if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {...result,value:typeof(select)==="function" ? select(value) : value};
+                else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:typeof(select)==="function" ? select(value) : value};
+                else if(valueMatch===undefined) yield {...result,value:typeof(select)==="function" ? select(value) : value};
+                else if(valueMatch===value) yield {...result,value:typeof(select)==="function" ? select(value) : value};
             }
         }
     }
@@ -81,7 +138,7 @@ function *getRangeFromIndex(where,partial,cname=where.constructor.name) {
 
 import {withExtensions} from "lmdb-extend";
 
-export {put,getRangeFromIndex,withExtensions};
+export {defineSchema,put,remove,getRangeFromIndex,withExtensions};
 
 // select([{Person: {name(value)=>value}}]).from({Person:{as:"P"}}).where({P:{name:"John"}})
 // select().from(Person).where({name:"John"})

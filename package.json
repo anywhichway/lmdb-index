@@ -1,7 +1,7 @@
 {
-  "name": "lmdb-objects",
-  "version": "0.0.1",
-  "description": "Higher level object operations for LMDB values, e.g. indexing",
+  "name": "lmdb-index",
+  "version": "0.0.2",
+  "description": "Higher level object operations for LMDB values, e.g. indexing and index based queries",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -9,25 +9,32 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anywhichway/lmdb-objects.git"
+    "url": "git+https://github.com/anywhichway/lmdb-index.git"
   },
   "keywords": [
     "lmdb",
     "index",
-    "objects"
+    "objects",
+    "mongodb",
+    "no-sql",
+    "schemaless"
   ],
   "author": "Simon Y. Blackwell",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/anywhichway/lmdb-objects/issues"
+    "url": "https://github.com/anywhichway/lmdb-index/issues"
   },
-  "homepage": "https://github.com/anywhichway/lmdb-objects#readme",
+  "homepage": "https://github.com/anywhichway/lmdb-index#readme",
   "devDependencies": {
     "jest": "^29.5.0",
     "lmdb": "^2.7.11"
   },
   "dependencies": {
+    "lmdb-copy": "^0.0.2",
     "lmdb-extend": "^1.1.1",
-    "lmdb-query": "^1.1.3"
+    "lmdb-move": "^0.1.0",
+    "lmdb-patch": "^1.0.2",
+    "lmdb-query": "^1.1.4",
+    "uuid": "^9.0.0"
   }
 }
