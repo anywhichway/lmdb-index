@@ -70,7 +70,11 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Same behavior as `lmdb` except that the index entries are removed.
 
-## async getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=where.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+## async getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+
+`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return truthy values and `DONE`.
+
+`cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch`. To query across all classes use the export `ANYCNAME` for `cname`
 
 ## withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
 
@@ -82,11 +86,13 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |   68.75 |    57.01 |   66.66 |   82.65 |
-index.js |   68.75 |    57.01 |   66.66 |   82.65 | 21-22,54-59,73,113-115,135-136,150-153
+All files |   70.67 |    58.47 |   66.66 |   84.46 |
+index.js |   70.67 |    58.47 |   66.66 |   84.46 | 22-23,56-61,121-123,144-145,159-162
 
 
 # Release Notes (Reverse Chronological Order)
+
+2023-04-23 v0.3.0 Using child databases sometimes caused crashes in a clustered environment. Removed child use and instead using a key prefix of @@<constructor name>. Added ability to query across multiple class types.
 
 2023-04-23 v0.2.0 Moved indexes to a separate child database so that they will not conflict with custom indexes and keys developed by application programmers using this library.
 
