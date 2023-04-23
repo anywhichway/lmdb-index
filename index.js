@@ -27,9 +27,9 @@ function getSchema(value) {
 }
 
 async function put(put,key,value,version,ifVersion) {
-    const db = this,
-        schema = getSchema.call(db,value);
+    const schema = getSchema.call(this,value);
     if(schema) {
+        const idb = (this.envdb||this).openDB(this.path+".index",{create:true});
         value[schema.idKey] ||= key || schema.keyGenerator();
         value[schema.idKey]+="";
         if(key!=null && key!==value[schema.idKey]) throw new Error(`Key ${key} does not match id ${schema.idKey}:${value[schema.idKey]}`);
@@ -52,7 +52,7 @@ async function put(put,key,value,version,ifVersion) {
         await this.transaction(async () => {
             if(entry) {
                 const id = key;
-                for(const {key} of getRangeWhere.call(db,[id])) {
+                for(const {key} of getRangeWhere.call(idb,[id])) {
                     const [id,property,v,cname] = key;
                     if(value[property]!==v) { // should be deepEqual
                         await this.remove(key);
@@ -61,13 +61,14 @@ async function put(put,key,value,version,ifVersion) {
                 }
             }
             for(const key of keys) {
-                if(this.get(key)!=null) continue;
-                result = await put(key,true);
+                if(idb.get(key)!=null) continue;
+                result = await idb.put(key,true);
                 if(!result) throw new Error(`Unable to index ${key}`)
             }
             result = await put(key,value,version,ifVersion);
             if(!result) throw new Error(`Unable to index ${key}`)
         })
+        idb.close();
         return result;
     } else {
         return put(key,value,version,ifVersion);
@@ -75,20 +76,21 @@ async function put(put,key,value,version,ifVersion) {
 }
 
 async function remove(remove,key,ifVersion) {
-    const db = this;
+    const idb = (this.envdb||this).openDB(this.path+".index",{create:true});
     let result;
     await this.transaction(async () => {
         result = await remove(key,ifVersion);
         if(!result) return;
         const id = key;
-        for(const {key} of getRangeWhere.call(db,[id])) {
+        for(const {key} of getRangeWhere.call(this,[id])) {
             if(key.length!==4) continue;
             const [id,property,v,cname] = key;
             if(typeof(property)!=="string" || typeof(cname)!=="string") continue;
-            await remove(key);
-            await remove([property,v,cname,id])
+            await idb.remove(key);
+            await idb.remove([property,v,cname,id])
         }
     })
+    idb.close();
     return result;
 }
 
@@ -97,11 +99,12 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
     const candidates = {};
     valueMatch ||= (value) => value;
     select ||= (value) => value;
+    const idb = (this.envdb||this).openDB(this.path+".index",{create:true});
     let total = 0;
     Object.entries(indexMatch).forEach(([property,value],i) => {
         const vtype = typeof(value),
             indexMatch = [property,value,cname];
-        for(const {key} of getRangeWhere.call(this,indexMatch,null,null,{wideRangeKeyStrings:true})) {
+        for(const {key} of getRangeWhere.call(idb,indexMatch,null,null,{wideRangeKeyStrings:true})) {
             const id = key.pop(),
                 candidate = candidates[id];
             if(vtype==="function" && !value(key[1])) continue;
@@ -117,6 +120,7 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
         }
         total++;
     })
+    idb.close();
     const valueMatchType = typeof(valueMatch)
     for(const [key,{count,value}] of Object.entries(candidates)) {
         if(offset && offset-->0) continue;

@@ -88,6 +88,8 @@ index.js |   68.75 |    57.01 |   66.66 |   82.65 | 21-22,54-59,73,113-115,135-1
 
 # Release Notes (Reverse Chronological Order)
 
+2023-04-23 v0.2.0 Moved indexes to a separate child database so that they will not conflict with custom indexes and keys developed by application programmers using this library.
+
 2023-04-23 v0.1.1 Documentation updates. Adjusted so that corrupt indexes do not return values for keys that do not exist.
 
 2023-04-22 v0.1.0 Made API more consistent with `lmdb-query`.
