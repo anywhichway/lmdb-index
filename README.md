@@ -70,7 +70,7 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Same behavior as `lmdb` except that the index entries are removed.
 
-## async getRangeFromIndex(where,?valueMatch,?select,{cname=where.constructor.name,versions,offset,bumpIndex,count,limit=count||Infinity}=?options={}) - returns AsyncIterableIterator
+## async getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=where.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
 ## withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
 
@@ -82,11 +82,13 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |    69.9 |    54.62 |   57.14 |   82.71 |
-index.js |    69.9 |    54.62 |   57.14 |   82.71 | 32-37,51,88-90,111-128
+All files |   68.75 |    57.01 |   66.66 |   82.65 |
+index.js |   68.75 |    57.01 |   66.66 |   82.65 | 21-22,54-59,73,113-115,135-136,150-153
 
 
 # Release Notes (Reverse Chronological Order)
+
+2023-04-23 v0.1.1 Documentation updates. Adjusted so that corrupt indexes do not return values for keys that do not exist.
 
 2023-04-22 v0.1.0 Made API more consistent with `lmdb-query`.
 

@@ -92,16 +92,16 @@ async function remove(remove,key,ifVersion) {
     return result;
 }
 
-function *getRangeFromIndex(where,valueMatch,select,{cname=where.constructor.name,versions,offset,limit=Infinity}={}) {
-    if(limit!==undefined && typeof(limit)!=="number") throw new TypeError(`limit must be a number for getRangeWhere, got ${typeof(limit)} : ${limit}`);
+function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.constructor.name,versions,offset,limit=Infinity}={}) {
+    if(limit!==undefined && typeof(limit)!=="number") throw new TypeError(`limit must be a number for getRangeindexMatch, got ${typeof(limit)} : ${limit}`);
     const candidates = {};
     valueMatch ||= (value) => value;
     select ||= (value) => value;
     let total = 0;
-    Object.entries(where).forEach(([property,value],i) => {
+    Object.entries(indexMatch).forEach(([property,value],i) => {
         const vtype = typeof(value),
-            where = [property,value,cname];
-        for(const {key} of getRangeWhere.call(this,where,null,null,{wideRangeKeyStrings:true})) {
+            indexMatch = [property,value,cname];
+        for(const {key} of getRangeWhere.call(this,indexMatch,null,null,{wideRangeKeyStrings:true})) {
             const id = key.pop(),
                 candidate = candidates[id];
             if(vtype==="function" && !value(key[1])) continue;
@@ -120,14 +120,15 @@ function *getRangeFromIndex(where,valueMatch,select,{cname=where.constructor.nam
     const valueMatchType = typeof(valueMatch)
     for(const [key,{count,value}] of Object.entries(candidates)) {
         if(offset && offset-->0) continue;
+        const entry = this.getEntry(key,{versions:true});
+        if(!entry) continue;
         if(select===true) {
             if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {key,value};
             else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {key,value};
             else if(valueMatch===undefined) yield {key,value};
             else if(valueMatch===value) yield {key,value};
         } else {
-            const entry = this.getEntry(key,{versions:true}),
-                value = entry.value,
+            const value = entry.value,
                 result = {key};
             if(entry.version!==undefined) result.version = entry.version;
             if(valueMatchType==="function" && valueMatch(value)!==undefined) yield {...result,value:select(value)};
