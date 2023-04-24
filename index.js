@@ -1,6 +1,8 @@
 import {getRangeWhere,matchPattern,DONE} from "lmdb-query";
 import {v4 as uuid} from "uuid";
 
+getRangeWhere.SILENT = true;
+
 const INAME_PREFIX = "@@";
 function defineSchema(ctor,options={}) {
     // {indexKeys:["name","age"],name:"Person",idKey:"#"}
@@ -59,7 +61,7 @@ async function put(put,key,value,version,ifVersion) {
                     const [id,property,v] = key;
                     if(value[property]!==v) { // should be deepEqual
                         await this.remove(key);
-                        await this.remove([iname,property,v,id])
+                        await this.remove([property,v,iname,id])
                     }
                 }
             }
@@ -90,7 +92,7 @@ async function remove(remove,key,ifVersion) {
             iname = INAME_PREFIX+id.split("@")[0];
         Object.entries(entry.value).forEach(async ([property,v]) => {
             if(typeof(v)!=="object") {
-                await remove([iname,property,v,id]);
+                await remove([property,v,iname,id]);
                 await remove([id,property,v]);
             }
         })

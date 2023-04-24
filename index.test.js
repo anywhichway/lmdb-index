@@ -20,9 +20,34 @@ test("getRangeFromIndex",async () => {
     await db.remove("Object@1");
     expect([...db.getRangeFromIndex({message:(value) => value!=null})]).toEqual([{key:"Object@2",value:{message:"hello","#":"Object@2"}}]);
     expect([...db.getRangeFromIndex({message:(value) => value!=null},undefined,(value) => value.message)]).toEqual([{key:"Object@2",value:"hello"}]);
+    result = [...db.getRange({start:[null]})];
+    expect(result.some(({key})=>key.includes("Object@1"))).toBe(false);
 })
 test("getRangeFromIndex autoid",async () => {
     const items = [...db.getRangeFromIndex({name:"joe"})];
     expect(items.length).toBe(1);
     expect(items[0].value.name).toBe("joe");
+})
+describe("load",() => {
+    test("put primitive",async () => {
+        const start = Date.now();
+        for(let i=0;i<10000;i++) {
+            await db.put(i,i);
+        }
+        console.log(`put primitive sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
+    },10000)
+    test("get primitive",async () => {
+        const start = Date.now();
+        for(let i=0;i<10000;i++) {
+            db.get(i);
+        }
+        console.log(`get primitive sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
+    },10000)
+    test("index",async () => {
+        const start = Date.now();
+        for(let i=0;i<10000;i++) {
+            await db.put(null,{name:"joe",age:21,address:{city:"New York",state:"NY"}});
+        }
+        console.log(`indexed sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
+    },10000)
 })

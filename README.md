@@ -92,6 +92,8 @@ index.js |   70.67 |    58.47 |   66.66 |   84.46 | 22-23,56-61,121-123,144-145,
 
 # Release Notes (Reverse Chronological Order)
 
+2023-04-23 v0.3.1 Fix to fully deleting objects from indexes
+
 2023-04-23 v0.3.0 Using child databases sometimes caused crashes in a clustered environment. Removed child use and instead using a key prefix of @@<constructor name>. Added ability to query across multiple class types.
 
 2023-04-23 v0.2.0 Moved indexes to a separate child database so that they will not conflict with custom indexes and keys developed by application programmers using this library.
