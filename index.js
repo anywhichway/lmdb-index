@@ -17,11 +17,11 @@ function defineSchema(ctor,options={}) {
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
-    if (ifVersion != null && entry.version !== ifVersion) return false;
+    if (ifVersion != null && entry?.version !== ifVersion) return false;
+    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.constructor.name) : null;
     if (!destKey) {
-        if (entry.value && typeof (entry.value) === "object") {
-            const schema = getSchema.call(this, entry.constructor.name),
-                value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
+        if (schema) {
+            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
             delete value[schema.idKey]
             return await this.put(null, value, version) ? value[schema.idKey] : false;
         }
@@ -69,10 +69,10 @@ function get(get,key,...args) {
 async function move(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (ifVersion != null && entry.version !== ifVersion) return false;
+    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.constructor.name) : null;
     if (!destKey) {
-        if (entry.value && typeof (entry.value) === "object") {
-            const schema = getSchema.call(this, entry.constructor.name),
-                value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
+        if (schema) {
+            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
             delete value[schema.idKey];
             let result = false;
             await this.childTransaction(async () => {
