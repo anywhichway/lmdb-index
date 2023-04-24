@@ -1,5 +1,7 @@
 # lmdb-index
-Higher level object operations for LMDB values, e.g. indexing and indexed based queries
+Object indexing and index based queries for LMDB. Also provides, automatic id generation, instantiation of returned objects as instances of their original classes.
+
+This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
 This is ALPHA software. The API is not yet stable and adequate unit testing has not been completed.
 
@@ -13,21 +15,30 @@ npm install lmdb-index
 
 ```javascript
 import {open} from "lmdb";
-import {defineSchema,put,remove,getRangeFromIndex,withExtensions} from "lmdb-index";
+import {withExtensions} from "lmdb-index";
 
-const db = withExtensions(open("test"),{defineSchema,put,remove,getRangeFromIndex});
+class Person {
+    constructor(config={}) {
+        Object.assign(this,config);
+    }
+}
+const db = withExtensions(open("test"));
 db.defineSchema(Object);
-await db.put(null,{message:"goodbye","#":1});
-await db.put(null,{message:"hello","#":2});
-console.log([...db.getRangeFromIndex({message:"hello"})]); // logs one
-console.log([...db.getRangeFromIndex({message(value) { return value!=null }})]); // 
+db.defineSchema(Person);
+const id = await db.put(null,new Person({name:"bill"}));
+if(id) {
+    const person = await db.get(id);
+    if(person && person instanceof Person) {
+        console.log(person)
+    }
+}
 ```
 
 ## API
 
 Documentation is for the modified behavior of the LMDB database NOT the exported functions.
 
-## async defineSchema(classConstructor,?options={}) - returns boolean
+### async defineSchema(classConstructor,?options={}) - returns boolean
 
 - The key names in the array `options.indexKeys` will be indexed. If no value is provided, all keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
 - If the property `options.idKey` is provided, its value will be used for unique ids. If `options.idKey` is not provided, the property `#` on instances will be used for unique ids.
@@ -37,14 +48,16 @@ The `options` properties and values are inherited by child schema, i.e. if you d
 
 To index all keys on all objects using UUIDs as ids and `#` as the id key, call `db.defineSchema(Object)`.
 
-### async put(key,value,?version,?ifVersion) - returns boolean
+*Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
+
+### async db.put(key,value,?version,?ifVersion) - returns boolean
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
-If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of and object controlled by a schema declared with `defineSchema`. To index all keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
 If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
-### async copy(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
+### async db.copy(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
 
 Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
 
@@ -60,29 +73,44 @@ If `key` points to a primitive:
 
 Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destKey` or `false` is returned.
 
-### async move(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
+### async db.getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+
+*NOTE*: `db.getRangeFromIndex` is an advanced API methods. The `select` method is far easier to use.
+
+`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return truthy values and `DONE`.
+
+`cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch`. To query across all classes use the export `ANYCNAME` for `cname`
+
+```javascript
+import {open} from "lmdb";
+import {defineSchema,get,put,remove,getRangeFromIndex,withExtensions} from "lmdb-index";
+
+const db = withExtensions(open("test"),{defineSchema,get,put,remove,getRangeFromIndex});
+db.defineSchema(Object);
+await db.put(null,{message:"goodbye","#":1});
+await db.put(null,{message:"hello","#":2});
+console.log([...db.getRangeFromIndex({message:"hello"})]); // logs one
+console.log([...db.getRangeFromIndex({message(value) { return value!=null }})]); // 
+```
+
+### async db.move(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
 
 Works similar to [lmdb-move](https://github.com/anywhichway/lmdb-move) but provides automatic key assignment and indexing.
 
 Works the same as `copy` above, except the entry at the original `key` is removed inside the transaction.
 
-### async patch(key,patch,?version,?ifVersion) - returns boolean
-
-NOT YET IMPLEMENTED
+### async db.patch(key,patch,?version,?ifVersion) - returns boolean
 
 Updates the index after the patch.
 
 Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
-### async remove(key,?version,?ifVersion) - returns boolean
+### async db.remove(key,?version,?ifVersion) - returns boolean
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### async getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+### select(?selector).from(...?classes).where(?conditions)
 
-`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return truthy values and `DONE`.
-
-`cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch`. To query across all classes use the export `ANYCNAME` for `cname`
 
 ### withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
 
@@ -94,8 +122,8 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |   68.98 |    57.64 |   79.16 |   80.26 |
-index.js |   68.98 |    57.64 |   79.16 |   80.26 | 28-33,43-48,85-90,118-123,137,180-182,211-212,226-229
+All files |   78.23 |    66.48 |     100 |   88.27 |
+index.js |   78.23 |    66.48 |     100 |   88.27 | 30-35,46,48,88-93,105,117,200-202,231-232
 
 
 # Release Notes (Reverse Chronological Order)
@@ -105,6 +133,10 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-04-27 v0.4.2 Added support for patch. Simplified `withExtensions` us. Enhanced documentation.
+
+2023-04-24 v0.4.1 Adjustments to `copy` and `move` to ensure correct id assignment. Documentation formatting and typo corrections.
 
 2023-04-24 v0.4.0 `copy` and `move` now supported.
 

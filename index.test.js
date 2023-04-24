@@ -1,5 +1,5 @@
 import {open} from "lmdb";
-import {copy,defineSchema,get,getRangeFromIndex,move,put,remove,withExtensions,ANYCNAME} from "./index.js";
+import {withExtensions,ANYCNAME} from "./index.js";
 
 class Person {
     constructor(props) {
@@ -7,7 +7,7 @@ class Person {
     }
 }
 
-const db = withExtensions(open("test.db",{useVersions:true}),{copy,defineSchema,get,getRangeFromIndex,move,put,remove});
+const db = withExtensions(open("test.db",{useVersions:true}));
 db.clearSync();
 db.defineSchema(Object);
 db.defineSchema(Person);
@@ -46,32 +46,15 @@ test("move object",async () => {
     expect(items[0].value["#"]).toBe(id);
     expect(db.get(key)).toBe(undefined);
 })
-test("copy object",async () => {
+test("copy and patch object",async () => {
     let items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
     const id = await db.copy(items[0].value["#"],null);
     items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
     expect(items.length).toBe(2);
-})
-xdescribe("load",() => {
-    test("put primitive",async () => {
-        const start = Date.now();
-        for(let i=0;i<10000;i++) {
-            await db.put(i,i);
-        }
-        console.log(`put primitive sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
-    },10000)
-    test("get primitive",async () => {
-        const start = Date.now();
-        for(let i=0;i<10000;i++) {
-            db.get(i);
-        }
-        console.log(`get primitive sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
-    },10000)
-    test("index",async () => {
-        const start = Date.now();
-        for(let i=0;i<10000;i++) {
-            await db.put(null,{name:"joe",age:21,address:{city:"New York",state:"NY"}});
-        }
-        console.log(`indexed sec:${(Date.now()-start)/1000} persec:${1000/((Date.now()-start)/1000)}`);
-    },10000)
+    await db.patch(id,{age:20});
+    const item = db.get(id);
+    expect(item.age).toBe(20);
+    items = [...db.getRangeFromIndex({age:20},null,null,{cname:"Person"})];
+    expect(items.length).toBe(1);
+    expect(items[0].value.age).toBe(20);
 })

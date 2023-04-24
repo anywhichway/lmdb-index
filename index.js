@@ -1,12 +1,14 @@
 import {ABORT} from "lmdb";
-import {getRangeWhere,matchPattern,DONE} from "lmdb-query";
+import {getRangeWhere,selector,matchPattern,DONE,ANY} from "lmdb-query";
 import {copy as lmdbCopy} from "lmdb-copy";
 import {move as lmdbMove} from "lmdb-move";
+import {patch as lmdbPatch} from "lmdb-patch";
 import {v4 as uuid} from "uuid";
 
 getRangeWhere.SILENT = true;
 
 const INAME_PREFIX = "@@";
+
 function defineSchema(ctor,options={}) {
     // {indexKeys:["name","age"],name:"Person",idKey:"#"}
     let name;
@@ -17,11 +19,11 @@ function defineSchema(ctor,options={}) {
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
-    if (ifVersion != null && entry.version !== ifVersion) return false;
+    if (ifVersion != null && entry?.version !== ifVersion) return false;
+    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.constructor.name) : null;
     if (!destKey) {
-        if (entry.value && typeof (entry.value) === "object") {
-            const schema = getSchema.call(this, entry.constructor.name),
-                value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
+        if (schema) {
+            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
             delete value[schema.idKey]
             return await this.put(null, value, version) ? value[schema.idKey] : false;
         }
@@ -49,6 +51,11 @@ function getSchema(value,create) {
     }
     schema.idKey ||= "#";
     schema.keyGenerator ||= uuid;
+    schema.create ||= function (value)  {
+        const instance = Object.assign(Object.create(this.ctor.prototype),value);
+        Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
+        return instance;
+    };
     return schema;
 }
 
@@ -56,12 +63,8 @@ function get(get,key,...args) {
     const value = get(key);
     if(value && typeof(value)==="object") {
         const cname = key.split("@")[0],
-            schema = getSchema.call(this,cname)
-        if(schema) {
-            const object = Object.assign(Object.create(schema.ctor.prototype),value);
-            Object.defineProperty(object,"constructor",{configurable:true,writable:true,value:schema.ctor});
-            return object;
-        }
+            schema = getSchema.call(this,cname);
+        return schema ? schema.create(value) : value;
     }
     return value;
 }
@@ -69,10 +72,10 @@ function get(get,key,...args) {
 async function move(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (ifVersion != null && entry.version !== ifVersion) return false;
+    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.constructor.name) : null;
     if (!destKey) {
-        if (entry.value && typeof (entry.value) === "object") {
-            const schema = getSchema.call(this, entry.constructor.name),
-                value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
+        if (schema) {
+            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
             delete value[schema.idKey];
             let result = false;
             await this.childTransaction(async () => {
@@ -90,6 +93,30 @@ async function move(key,destKey,overwrite,version,ifVersion) {
     return false;
 }
 
+async function patch(key,patch,version,ifVersion) {
+    const entry = this.getEntry(key, {versions: true});
+    if (ifVersion != null && entry.version !== ifVersion) return false;
+    const cname = key.split("@")[0],
+        schema = getSchema.call(this,key);
+    if(schema) {
+        const iname = INAME_PREFIX + cname;
+        await this.childTransaction(async () => {
+            if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
+                throw new Error(`Unable to patch ${key}`);
+            }
+            for(const [property,value] of Object.entries(patch)) {
+                const oldValue = entry.value[property];
+                if(oldValue!==undefined && oldValue!==value) {
+                    await this.remove([property, oldValue, iname, key]);
+                    await this.put([property,value,iname,key],true);
+                }
+            }
+        });
+        return true;
+    }
+    return lmdbPatch.call(this,key,patches,version,ifVersion);
+}
+
 async function put(put,key,value,version,ifVersion) {
     const schema = getSchema.call(this,value,true);
     if(schema) {
@@ -101,40 +128,35 @@ async function put(put,key,value,version,ifVersion) {
         const entry = this.getEntry(key);
         if(ifVersion && (!entry || (entry.version!==ifVersion))) return false;
         const iname = INAME_PREFIX+value.constructor.name,
+            id = key,
             now = Date.now(),
             indexKeys = schema.indexKeys || Object.keys(value),
-            keys = [...indexKeys.reduce((keys,property) => {
-                const v = value[property]!==undefined ? value[property] : null;
-                if(!v || typeof(v)!=="object") keys.push([property,v,iname,key]);
+            keys = indexKeys.reduce((keys,property) => {
+                const v = value[property]!==undefined ? value[property] : null,
+                    key = [property,v,iname,id];
+                if((!v || typeof(v)!=="object") && !this.get(key)) keys.push([property,v,iname,id]);
                 return keys;
-            },[]),...indexKeys.reduce((keys,property) => {
-                const v = value[property]!==undefined ? value[property] : null;
-                if(!v || typeof(v)!=="object") keys.push([key,property,v]);
-                return keys;
-            },[])];
+            },[]);
         let result;
         await this.childTransaction(async () => {
-            if(entry) {
-                const id = key;
-                for(const {key} of getRangeWhere.call(this,[id])) {
-                    const [id,property,v] = key;
-                    if(value[property]!==v) { // should be deepEqual
-                        await this.remove(key);
-                        await this.remove([property,v,iname,id])
+            if(entry?.value && typeof(entry.value)==="object") {
+                for(const [k,v] of Object.entries(entry.value)) {
+                    if(value[k]!==v && (!v || typeof(v)!=="object")) {
+                        await this.remove([k,v,iname,id])
                     }
                 }
             }
             for(const key of keys) {
-                if(this.get(key)!=null) continue;
                 result = await put(key,true);
-                if(!result) throw new Error(`Unable to index ${key}`)
+                if(!result) throw new Error(`Unable to index ${key} for ${id}`)
             }
-            result = await put(key,value,version,ifVersion);
-            if(!result) throw new Error(`Unable to index ${key}`)
+            result = await put(id,value,version,ifVersion);
+            if(!result) throw new Error(`Unable to index ${id}`)
         })
-        return result;
+        return result ? key : result;
     } else {
-        return put(key,value,version,ifVersion);
+        const result = put(key,value,version,ifVersion);
+        return result ? key : result;
     }
 }
 
@@ -142,17 +164,15 @@ async function remove(remove,key,ifVersion) {
     let result;
     await this.childTransaction(async () => {
         const entry = this.getEntry(key);
-        if(!entry) return;
         result = await remove(key,ifVersion);
-        if(!result) return;
+        if(!result || !entry?.value || typeof(entry.value)!=="object") return;
         const id = key,
             iname = INAME_PREFIX+id.split("@")[0];
-        Object.entries(entry.value).forEach(async ([property,v]) => {
-            if(typeof(v)!=="object") {
-                await remove([property,v,iname,id]);
-                await remove([id,property,v]);
+        for(const [property,value] of Object.entries(entry.value)) {
+            if(!value || typeof(value)!=="object") {
+                await remove([property,value,iname,id]);
             }
-        })
+        }
     })
     return result;
 }
@@ -211,27 +231,15 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
             else if(valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:select(value)};
             else if(valueMatch===value) yield {...result,value:select(value)};
         }
-        if(--limit===0) return;
+        if(--limit<=0) return;
     }
 }
 
-import {withExtensions} from "lmdb-extend";
+import {withExtensions as lmdbExtend} from "lmdb-extend";
 
-export {copy,defineSchema,get,getRangeFromIndex,move,put,remove,withExtensions,INAME_PREFIX as ANYCNAME};
-
-// select([{Person: {name(value)=>value}}]).from({Person:{as:"P"}}).where({P:{name:"John"}})
-// select().from(Person).where({name:"John"})
-
-function select(selector) {
-    return {
-        from: (...classes) => {
-            const create = selector===undefined && classes.length===1 ? (value) => Object.assign(Object.create(classes[0].prototype),value) : (value) => value;
-            return {
-                where: (where) => {
-
-                }
-            }
-        }
-    }
-
+const withExtensions = (db,extensions={}) => {
+    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,move,patch,put,remove,...extensions})
 }
+
+export {copy,defineSchema,get,getRangeFromIndex,move,patch,put,remove,withExtensions,INAME_PREFIX as ANYCNAME};
+
