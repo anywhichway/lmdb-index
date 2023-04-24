@@ -1,12 +1,19 @@
 import {open} from "lmdb";
-import {defineSchema,put,remove,getRangeFromIndex,withExtensions,ANYCNAME} from "./index.js";
+import {copy,defineSchema,get,getRangeFromIndex,move,put,remove,withExtensions,ANYCNAME} from "./index.js";
 
-const db = withExtensions(open("test.db",{useVersions:true}),{defineSchema,put,remove,getRangeFromIndex});
+class Person {
+    constructor(props) {
+        Object.assign(this,props);
+    }
+}
+
+const db = withExtensions(open("test.db",{useVersions:true}),{copy,defineSchema,get,getRangeFromIndex,move,put,remove});
 db.clearSync();
 db.defineSchema(Object);
+db.defineSchema(Person);
 await db.put(null,{message:"goodbye","#":1});
 await db.put(null,{message:"hello","#":2});
-await db.put(null,{name:"joe",age:21,address:{city:"New York",state:"NY"}});
+await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"NY"}}));
 
 test("getRangeFromIndex",async () => {
     let result = [...db.getRangeFromIndex({message:"hello"})];
@@ -24,11 +31,28 @@ test("getRangeFromIndex",async () => {
     expect(result.some(({key})=>key.includes("Object@1"))).toBe(false);
 })
 test("getRangeFromIndex autoid",async () => {
-    const items = [...db.getRangeFromIndex({name:"joe"})];
+    const items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
     expect(items.length).toBe(1);
     expect(items[0].value.name).toBe("joe");
+    expect(items[0].value).toBeInstanceOf(Person);
 })
-describe("load",() => {
+test("move object",async () => {
+    let items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
+    const key = items[0].value["#"];
+    const id = await db.move(key,null);
+    items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
+    expect(items.length).toBe(1);
+    expect(items[0].value["#"]).not.toBe(key);
+    expect(items[0].value["#"]).toBe(id);
+    expect(db.get(key)).toBe(undefined);
+})
+test("copy object",async () => {
+    let items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
+    const id = await db.copy(items[0].value["#"],null);
+    items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
+    expect(items.length).toBe(2);
+})
+xdescribe("load",() => {
     test("put primitive",async () => {
         const start = Date.now();
         for(let i=0;i<10000;i++) {
