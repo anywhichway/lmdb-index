@@ -55,6 +55,7 @@ To index all keys on all objects using UUIDs as ids and `#` as the id key, call 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
 If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+
 If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
 ### async db.copy(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
