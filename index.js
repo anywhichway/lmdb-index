@@ -1,5 +1,5 @@
 import {ABORT} from "lmdb";
-import {getRangeWhere,selector,matchPattern,DONE,ANY} from "lmdb-query";
+import {getRangeWhere,selector,matchPattern,DONE,ANY,withExtensions as lmdbExtend} from "lmdb-query";
 import {copy as lmdbCopy} from "lmdb-copy";
 import {move as lmdbMove} from "lmdb-move";
 import {patch as lmdbPatch} from "lmdb-patch";
@@ -235,11 +235,9 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
     }
 }
 
-import {withExtensions as lmdbExtend} from "lmdb-extend";
-
 const withExtensions = (db,extensions={}) => {
-    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,move,patch,put,remove,...extensions})
+    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,getSchema,move,patch,put,remove,...extensions})
 }
 
-export {copy,defineSchema,get,getRangeFromIndex,move,patch,put,remove,withExtensions,INAME_PREFIX as ANYCNAME};
+export {copy,defineSchema,get,getRangeFromIndex,getSchema,move,patch,put,remove,withExtensions,INAME_PREFIX as ANYCNAME};
 

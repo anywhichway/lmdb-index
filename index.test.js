@@ -1,5 +1,16 @@
 import {open} from "lmdb";
-import {withExtensions,ANYCNAME} from "./index.js";
+import {
+    withExtensions,
+    ANYCNAME,
+    copy,
+    defineSchema,
+    get,
+    getRangeFromIndex,
+    getSchema,
+    move,
+    patch,
+    put, remove
+} from "./index.js";
 
 class Person {
     constructor(props) {
@@ -14,6 +25,12 @@ db.defineSchema(Person);
 await db.put(null,{message:"goodbye","#":1});
 await db.put(null,{message:"hello","#":2});
 await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"NY"}}));
+
+["copy","defineSchema","get","getRangeFromIndex","getSchema","move","patch","put","remove"].forEach((fname) => {
+    test(`has ${fname}`,() => {
+        expect(typeof db[fname]).toBe("function")
+    })
+})
 
 test("getRangeFromIndex",async () => {
     let result = [...db.getRangeFromIndex({message:"hello"})];

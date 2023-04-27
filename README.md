@@ -110,12 +110,11 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### select(?selector).from(...?classes).where(?conditions)
-
-
 ### withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
+
+Automatically adds `copy`, `move`, `patch` from their respective lmdb packages and `getRangeWhere` from `lmdb-query`.
 
 # Testing
 
@@ -134,6 +133,10 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-04-28 v0.5.0 Added `getSchema` to exports. Enhanced unit tests.
+
+2023-04-28 v0.4.3 Adjusted to use `withextensions` from `lmdb-query`. Enhanced documentation.
 
 2023-04-27 v0.4.2 Added support for patch. Simplified `withExtensions` us. Enhanced documentation.
 
