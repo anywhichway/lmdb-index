@@ -12,7 +12,19 @@ import {
     put, remove
 } from "./index.js";
 
+class Message {
+    constructor(props) {
+        Object.assign(this,props);
+    }
+}
+
 class Person {
+    constructor(props) {
+        Object.assign(this,props);
+    }
+}
+
+class Unindexed {
     constructor(props) {
         Object.assign(this,props);
     }
@@ -20,11 +32,13 @@ class Person {
 
 const db = withExtensions(open("test.db",{useVersions:true}));
 db.clearSync();
-db.defineSchema(Object);
-db.defineSchema(Person);
-await db.put(null,{message:"goodbye","#":1});
-await db.put(null,{message:"hello","#":2});
-await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"NY"}}));
+db.defineSchema(Message);
+const personSchema = db.defineSchema(Person);
+await db.put("Unindexed@1",new Unindexed({name:"joe"}));
+await db.put(null,new Unindexed({name:"joe"}));
+await db.put(null,new Message({message:"goodbye","#":1}));
+await db.put(null,new Message({message:"hello","#":2}));
+const personId = await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"NY"}}));
 
 ["copy","defineSchema","get","getRangeFromIndex","getSchema","move","patch","put","remove"].forEach((fname) => {
     test(`has ${fname}`,() => {
@@ -32,20 +46,30 @@ await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"
     })
 })
 
+test("correct id",async () => {
+    expect(personId.startsWith("Person@")).toBe(true);
+})
+
+test("redefine Schema",() => {
+    const schema = db.defineSchema(personSchema.ctor);
+    expect(schema).toBe(personSchema)
+})
+
 test("getRangeFromIndex",async () => {
-    let result = [...db.getRangeFromIndex({message:"hello"})];
-    expect(result).toEqual([{key:"Object@2",value:{message:"hello","#":"Object@2"}}]);
-    result = [...db.getRangeFromIndex({message(value) { return value!=null}})];
-    expect(result).toEqual([{key:"Object@1",value:{message:"goodbye","#":"Object@1"}},{key:"Object@2",value:{message:"hello","#":"Object@2"}}]);
-    result = [...db.getRangeFromIndex({message(value) { return value!=null}},(value) => value.message==="goodbye" ? value : undefined,true)];
-    expect(result).toEqual([{key:"Object@1",value:{message:"goodbye"}}]);
+    let result = [...db.getRangeFromIndex({message:"hello"},null,null,{cname:"Message"})];
+    expect(result).toEqual([{key:"Message@2",value:{"#":"Message@2",message:"hello",}}]);
+    result = [...db.getRangeFromIndex({message(value) { return value!=null}},null,null,{cname:"Message"})];
+    expect(result).toEqual([{key:"Message@1",value:{message:"goodbye","#":"Message@1"}},{key:"Message@2",value:{message:"hello","#":"Message@2"}}]);
+    result = [...db.getRangeFromIndex({message(value) { return value!=null}},(value) => value.message==="goodbye" ? value : undefined,true,{cname:"Message"})];
+    expect(result).toEqual([{key:"Message@1",value:{message:"goodbye"}}]);
    const all = [...db.getRangeFromIndex({message(value) { return value!=null}},null,null,{cname:ANYCNAME})];
    expect(all.length).toBe(2);
-    await db.remove("Object@1");
-    expect([...db.getRangeFromIndex({message:(value) => value!=null})]).toEqual([{key:"Object@2",value:{message:"hello","#":"Object@2"}}]);
-    expect([...db.getRangeFromIndex({message:(value) => value!=null},undefined,(value) => value.message)]).toEqual([{key:"Object@2",value:"hello"}]);
+    await db.remove("Message@1");
+    expect([...db.getRangeFromIndex({message:(value) => value!=null},null,null,{cname:"Message"})]).toEqual([{key:"Message@2",value:{message:"hello","#":"Message@2"}}]);
+    expect([...db.getRangeFromIndex({message:(value) => value!=null},undefined,(value) => value.message,{cname:"Message"})]).toEqual([{key:"Message@2",value:"hello"}]);
     result = [...db.getRange({start:[null]})];
-    expect(result.some(({key})=>key.includes("Object@1"))).toBe(false);
+    expect(result.some(({key})=>key?.includes("Message@2"))).toBe(true);
+    expect(result.some(({key})=>key?.includes("Message@1"))).toBe(false);
 })
 test("getRangeFromIndex autoid",async () => {
     const items = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
@@ -75,3 +99,52 @@ test("copy and patch object",async () => {
     expect(items.length).toBe(1);
     expect(items[0].value.age).toBe(20);
 })
+test("copy unindexed instance",async () => {
+    const id = await db.copy("Unindexed@1");
+    expect(id.startsWith("Unindexed@")).toBe(false)
+})
+test("copy unindexed instance with key",async () => {
+    const id = await db.copy("Unindexed@1","unindexed");
+    expect(id).toBe("unindexed");
+})
+
+test("copy unindexed overwrite throws",async () => {
+    try {
+        await db.copy("Unindexed@1","unindexed")
+    } catch(e) {
+        return;
+    }
+    throw new Error("copy overwrite did not throw")
+})
+
+test("copy unindexed overwrite throws",async () => {
+    const id = await db.copy("Unindexed@1","unindexed",true);
+    expect(id).toBe("unindexed");
+})
+
+test("move unindexed instance",async () => {
+    const id = await db.move("Unindexed@1","Unindexed@2");
+    expect(id).toBe("Unindexed@2")
+})
+
+test("move unindexed overwrite throws",async () => {
+    try {
+        await db.move("Unindexed@2","unindexed")
+    } catch(e) {
+        return;
+    }
+    throw new Error("move overwrite did not throw")
+})
+
+test("move unindexed overwrite throws",async () => {
+    const id = await db.copy("Unindexed@2","unindexed",true);
+    expect(id).toBe("unindexed");
+})
+
+test("move unindexed instance autokey",async () => {
+    const id = await db.move("unindexed");
+    expect(id).toBeTruthy()
+})
+
+
+

@@ -3,7 +3,7 @@ Object indexing and index based queries for LMDB. Also provides, automatic id ge
 
 This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
-This is ALPHA software. The API is not yet stable and adequate unit testing has not been completed.
+This is BETA software. The API is stable and unit test coverage exceeds 90%.
 
 # Installation
 
@@ -133,6 +133,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-04-29 v0.5.1 Adjusted `defineSchema` so that it updates rather than overwrites definition if called a second time. Updated dependency versions. Adjusted unit tests. Fixed issues with `copy` and `move` not calling underlying code with `this` context. Unit test coverage over 90%, moving to BETA.
 
 2023-04-28 v0.5.0 Added `getSchema` to exports. Enhanced unit tests.
 
