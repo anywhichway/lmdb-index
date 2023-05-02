@@ -134,6 +134,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-05-02 v0.6.0 Added support for storing plain arrays as top level database entries, e.g. `await db.put(null,[1,2,3])`
+
 2023-04-29 v0.5.1 Adjusted `defineSchema` so that it updates rather than overwrites definition if called a second time. Updated dependency versions. Adjusted unit tests. Fixed issues with `copy` and `move` not calling underlying code with `this` context. Unit test coverage over 90%, moving to BETA.
 
 2023-04-28 v0.5.0 Added `getSchema` to exports. Enhanced unit tests.
@@ -159,3 +161,9 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 2023-04-22 v0.0.2 Documentation updates. Addition of `defineSchema` and UUID generation.
 
 2023-04-21 v0.0.1 Initial public release
+
+# License
+
+This software is provided as-is under the [MIT license](http://opensource.org/licenses/MIT).
+
+Copyright (c) 2023, AnyWhichWay, LLC and Simon Y. Blackwell.

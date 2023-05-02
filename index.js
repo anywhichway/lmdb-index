@@ -1,3 +1,15 @@
+/*MIT License
+Copyright 2023, AnyWhichWay, LLC and Simon Y. Blackwell
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 import {ABORT} from "lmdb";
 import {getRangeWhere,selector,matchPattern,DONE,ANY,withExtensions as lmdbExtend} from "lmdb-query";
 import {copy as lmdbCopy} from "lmdb-copy";
@@ -54,8 +66,8 @@ function getSchema(value,create) {
     schema.idKey ||= "#";
     schema.keyGenerator ||= uuid;
     schema.create ||= function (value)  {
-        const instance = Object.assign(Object.create(this.ctor.prototype),value);
-        Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
+        const instance = Object.assign(this.ctor===Array ? [] : Object.create(this.ctor.prototype),value);
+        if(this.ctor!==Array) Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
         return instance;
     };
     return schema;

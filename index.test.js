@@ -146,5 +146,14 @@ test("move unindexed instance autokey",async () => {
     expect(id).toBeTruthy()
 })
 
+test("handle array creation",async () => {
+    db.defineSchema(Array);
+    const id = await db.put(null,[1,2,3]);
+    expect(db.get(id)).toEqual([1,2,3]);
+    const items = [...db.getRangeFromIndex({0:1},null,null,{cname:"Array"})];
+    expect(items.length).toBe(1);
+    expect(items[0].value).toEqual([1,2,3]);
+})
+
 
 
