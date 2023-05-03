@@ -153,9 +153,11 @@ async function put(put,key,value,version,ifVersion) {
             now = Date.now(),
             indexKeys = schema.indexKeys || Object.keys(value),
             keys = indexKeys.reduce((keys,property) => {
-                const v = value[property]!==undefined ? value[property] : null,
-                    key = [property,v,iname,id];
-                if((!v || typeof(v)!=="object") && !this.get(key)) keys.push([property,v,iname,id]);
+                if(value[property]!=null) { // nulls can't be inserted because they are used as a proxy for objects
+                    const v = typeof(value[property])==="object" ? null : value[property],
+                        key = [property,v,iname,id];
+                    if(!this.get(key)) keys.push([property,v,iname,id]);
+                }
                 return keys;
             },[]);
         let result;
@@ -234,7 +236,14 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
                 if(some) break;
                 else continue;
             }
-            if(vtype==="function" && !value(key[1])) continue;
+            if(vtype==="function") {
+                if(key[1]===null) { // the property had an object as a value, so not indexed
+                    const object = this.get(id);
+                    if(value(object ? object[property] : undefined)===undefined) continue;
+                } else if(value(key[1])===undefined) {
+                    continue;
+                }
+            }
             some = true;
             if(i===0) {
                 candidates[id] = {

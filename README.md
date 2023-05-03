@@ -40,13 +40,13 @@ Documentation is for the modified behavior of the LMDB database NOT the exported
 
 ### async defineSchema(classConstructor,?options={}) - returns boolean
 
-- The key names in the array `options.indexKeys` will be indexed. If no value is provided, all keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
+- The key names in the array `options.indexKeys` will be indexed. If no value is provided, all top level keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
 - If the property `options.idKey` is provided, its value will be used for unique ids. If `options.idKey` is not provided, the property `#` on instances will be used for unique ids.
 - If the property `options.keyGenerator` is provided, its value should be a function that returns a unique id. If `options.keyGenerator` is not provided, a v4 UUID will be used.
 
 The `options` properties and values are inherited by child schema, i.e. if you define them for `Object`, then you do not need to provide them for other classes.
 
-To index all keys on all objects using UUIDs as ids and `#` as the id key, call `db.defineSchema(Object)`.
+To index all top level keys on all objects using UUIDs as ids and `#` as the id key, call `db.defineSchema(Object)`.
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
@@ -54,7 +54,7 @@ To index all keys on all objects using UUIDs as ids and `#` as the id key, call 
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
-If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+If `value` is an object, it will be indexed by the top level keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
 
 If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
@@ -133,6 +133,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-05-03 v0.6.1 Addressed issue where properties with non-primitve values were not being indexed.
 
 2023-05-02 v0.6.0 Added support for storing plain arrays as top level database entries, e.g. `await db.put(null,[1,2,3])`
 
