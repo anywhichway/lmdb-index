@@ -134,6 +134,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-05-04 0.6.2 Updated dependencies.
+
 2023-05-03 v0.6.1 Addressed issue where properties with non-primitve values were not being indexed.
 
 2023-05-02 v0.6.0 Added support for storing plain arrays as top level database entries, e.g. `await db.put(null,[1,2,3])`

@@ -150,7 +150,6 @@ async function put(put,key,value,version,ifVersion) {
         if(ifVersion && (!entry || (entry.version!==ifVersion))) return false;
         const iname = INAME_PREFIX+value.constructor.name,
             id = key,
-            now = Date.now(),
             indexKeys = schema.indexKeys || Object.keys(value),
             keys = indexKeys.reduce((keys,property) => {
                 if(value[property]!=null) { // nulls can't be inserted because they are used as a proxy for objects

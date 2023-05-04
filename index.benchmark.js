@@ -1,5 +1,5 @@
 import {open} from "lmdb";
-import {copy,defineSchema,get,getRangeFromIndex,move,put,remove,withExtensions,ANYCNAME} from "./index.js";
+import {withExtensions} from "./index.js";
 
 const benchmark = await import("./node_modules/benchmark/benchmark.js"),
     Benchmark = benchmark.default,
