@@ -184,7 +184,10 @@ async function put(put,key,value,version,ifVersion) {
 
 async function remove(remove,key,ifVersion) {
     const entry = this.getEntry(key);
-    if(!entry || !entry?.value || typeof(entry.value)!=="object") return;
+    if(!entry) return;
+    if(entry.value===null || typeof(entry.value)!=="object") {
+        return await remove(key,ifVersion);
+    }
     const id = key,
         iname = INAME_PREFIX+id.split("@")[0],
         schema = getSchema.call(this,entry.value);
