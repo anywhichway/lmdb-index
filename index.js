@@ -177,7 +177,7 @@ async function put(put,key,value,version,ifVersion) {
         })
         return result ? key : result;
     } else {
-        const result = put(key,value,version,ifVersion);
+        const result = await put(key,value,version,ifVersion);
         return result ? key : result;
     }
 }

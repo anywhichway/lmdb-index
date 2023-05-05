@@ -134,6 +134,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-05-05 v0.6.4 Updated `lmdb-query` to 1.5.4. Fixed issue with `put` not awaiting.
+
 2023-05-05 v0.6.3 Updated `lmdb-query` to 1.5.3.
 
 2023-05-04 0.6.2 Updated dependencies. 
