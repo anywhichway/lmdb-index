@@ -134,7 +134,9 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-05-04 0.6.2 Updated dependencies.
+2023-05-05 v0.6.3 Updated `lmdb-query` to 1.5.3.
+
+2023-05-04 0.6.2 Updated dependencies. 
 
 2023-05-03 v0.6.1 Addressed issue where properties with non-primitve values were not being indexed.
 

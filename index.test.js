@@ -39,6 +39,7 @@ await db.put(null,new Unindexed({name:"joe"}));
 await db.put(null,new Message({message:"goodbye","#":1}));
 await db.put(null,new Message({message:"hello","#":2}));
 const personId = await db.put(null,new Person({name:"joe",age:21,address:{city:"New York",state:"NY"}}));
+await db.committed;
 
 ["copy","defineSchema","get","getRangeFromIndex","getSchema","move","patch","put","remove"].forEach((fname) => {
     test(`has ${fname}`,() => {
