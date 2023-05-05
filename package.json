@@ -34,7 +34,7 @@
     "lmdb-copy": "^0.0.4",
     "lmdb-move": "^0.1.2",
     "lmdb-patch": "^1.0.4",
-    "lmdb-query": "^1.5.3",
+    "lmdb-query": "^1.5.4",
     "uuid": "^9.0.0"
   }
 }
