@@ -50,7 +50,23 @@ if(id) {
 
 ## API
 
-### async defineSchema(classConstructor,?options={}) - returns boolean
+### async db.copy(key,?destKey,?overwrite,?version,?ifVersion) - returns boolean
+
+Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
+
+If `key` refers to an object for which there is a schema:
+- If `destKey` is nullish, the `destKey` is given a value using the schema's key generator and assigned to the object copy
+- The copy is inserted and indexed inside a transaction
+- The `destKey` is returned if the transaction succeeds, otherwise `undefined` is returned.
+
+If `key` points to a primitive:
+- If `destKey` is nullish, it given a UUIDv4 value
+- The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
+- The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
+
+Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destKey` or `false` is returned.
+
+### async db.defineSchema(classConstructor,?options={}) - returns boolean
 
 - The key names in the array `options.indexKeys` will be indexed. If no value is provided, all top level keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
 - If the property `options.idKey` is provided, its value will be used for unique ids. If `options.idKey` is not provided, the property `#` on instances will be used for unique ids.
@@ -62,41 +78,17 @@ To index all top level keys on all objects using UUIDs as ids and `#` as the id 
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
-### async db.put(key,value,?cname,?version,?ifVersion) - returns boolean
+### db.getSchema(value:string|object) - returns object representing schema
 
-Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
+Returns the schema for the class of the object or `undefined`.
 
-If `value` is an object, it will be indexed by the top level keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+### async db.getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,sortable,fulltext,sort,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
-When putting an object for indexing, the `key` should eb `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
-
-The `cname` argument is used to specify the class name of the object being put. If `cname` is not provided, the class name is determined by the constructor name of the `value` argument. This allows the developer to use plain objects. If `value` is a primitive, `cname` is ignored.    
-
-If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
-
-The `key` or in the case of objects the object id is returned if the transaction succeeds, otherwise `undefined` is returned.
-
-### async db.copy(key,?destKey,?overwrite,?version,?ifVersion) - returns boolean
-
-Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
-
-If `key` refers to an object for which there is a schema:
-    - If `destKey` is nullish, the `destKey` is given a value using the schema's key generator and assigned to the object copy 
-    - The copy is inserted and indexed inside a transaction
-    - The `destKey` is returned if the transaction succeeds, otherwise `undefined` is returned.
-
-If `key` points to a primitive:
-    - If `destKey` is nullish, it given a UUIDv4 value 
-    - The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
-    - The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
-
-Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destKey` or `false` is returned.
-
-### async db.getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
-
-`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return truthy values and `DONE`.
+`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return non-undefined values or `DONE`.
 
 `cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch`. To query across all classes use the export `ANYCNAME` for `cname`
+
+`sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches. `sortable` and `fulltext` return entries in the order they are indexed. `sort` returns entries based on how many index matches occurred, with the highest first.
 
 ```javascript
 import {open} from "lmdb";
@@ -110,7 +102,11 @@ console.log([...db.getRangeFromIndex({message:"hello"})]); // logs one
 console.log([...db.getRangeFromIndex({message(value) { return value!=null }})]); // 
 ```
 
-### async db.move(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
+### async db.index(object:object,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+
+Puts the object in the database and indexes it inside a single transaction. Returns the object's id if successful, otherwise `undefined`.
+
+### async db.move(key,destKey,?overwrite,?version,?ifVersion) - returns LMDBKey|undefined
 
 Works similar to [lmdb-move](https://github.com/anywhichway/lmdb-move) but provides automatic key assignment and indexing.
 
@@ -118,15 +114,31 @@ Works the same as `copy` above, except the entry at the original `key` is remove
 
 ### async db.patch(key,patch,?version,?ifVersion) - returns boolean
 
-Updates the index after the patch.
+Inside a single transaction, updates the index after the patch.
 
 Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
-### async db.remove(key,?version,?ifVersion) - returns boolean
+### async db.put(key,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+
+Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
+
+If `value` is an object, it will be indexed by the top level keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+
+When putting an object for indexing, the `key` should eb `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
+
+The `cname` argument is used to specify the class name of the object being put. If `cname` is not provided, the class name is determined by the constructor name of the `value` argument. This allows the developer to use plain objects. If `value` is a primitive, `cname` is ignored.
+
+If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
+
+The `key` or in the case of objects the object id is returned if the transaction succeeds, otherwise `undefined` is returned.
+
+See `db.index` to avoid the need for a `null` first argument and more information.
+
+### async db.remove(key,?version,?ifVersion) - returns LMDBKey|undefined
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### withExtensions(db:lmdbDatabase,?extensions:object) - returns lmdbDatabase`
+### withExtensions(db:lmdbDatabase,?extensions:object) - returns LMDBDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
@@ -151,7 +163,9 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Bug fixes and documentation changes will increment the patch version.
 
 
-2023-05-13 v0.7.1 Updated documentation. Not yet documented in built in full-text indexing and search.
+2023-05-14 v0.7.2 Updated documentation.
+
+2023-05-13 v0.7.1 Updated documentation. Not yet documented, built in full-text indexing and search.
 
 2023-05-13 v0.7.0 Reworked indexing to simplify, improve speed and support full text indexing.
 
