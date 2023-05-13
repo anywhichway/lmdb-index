@@ -134,7 +134,11 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-05-06 v0.6.5 Fixed issue wih not removing un-indexed primitives.
+2023-05-13 v0.7.0 Reworked indexing to simplify and improve speed.
+
+2023-05-06 v0.6.6 Removed test db from Git.
+
+2023-05-05 v0.6.5 Fixed issue wih not removing un-indexed primitives.
 
 2023-05-05 v0.6.4 Updated `lmdb-query` to 1.5.4. Fixed issue with `put` not awaiting.
 

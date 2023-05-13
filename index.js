@@ -10,16 +10,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+
 import {ABORT} from "lmdb";
-import {getRangeWhere,selector,matchPattern,DONE,ANY,withExtensions as lmdbExtend} from "lmdb-query";
+import {ANY,DONE,withExtensions as lmdbExtend} from "lmdb-query";
 import {copy as lmdbCopy} from "lmdb-copy";
 import {move as lmdbMove} from "lmdb-move";
 import {patch as lmdbPatch} from "lmdb-patch";
 import {v4 as uuid} from "uuid";
-
-getRangeWhere.SILENT = true;
-
-const INAME_PREFIX = "@@";
 
 function defineSchema(ctor,options={}) {
     // {indexKeys:["name","age"],name:"Person",idKey:"#"}
@@ -27,26 +24,125 @@ function defineSchema(ctor,options={}) {
     this.schema ||= {};
     options.ctor = ctor;
     this.schema[ctor.name] ||= {};
-    Object.assign(this.schema[ctor.name],options)
+    Object.assign(this.schema[ctor.name],options);
     return this.schema[ctor.name];
 }
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
-    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.value.constructor.name) : null;
+    const cname = entry.value.constructor.name,
+        schema = entry.value && typeof (entry.value) === "object" ? this.getSchema(cname) : null;
     if (!destKey) {
         if (schema) {
             const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
             delete value[schema.idKey]
-            return await this.put(null, value, version) ? value[schema.idKey] : false;
+            return await this.put(null, value, version) ;
         }
-        destKey = uuid();
-        return await lmdbCopy.call(this,key, destKey, overwrite, version, ifVersion) ? destKey : false;
-    } else if(await lmdbCopy.call(this,key, destKey, overwrite, version, ifVersion)) {
-        return destKey;
+        destKey = `${cname}@${uuid()}`;
     }
-    return false;
+    return await lmdbCopy.call(this,key, destKey, overwrite, version, ifVersion) ? destKey : undefined;
+}
+
+function get(get,key,...args) {
+    const value = deserializeSpecial(null,get(key,...args));
+    if(value && typeof(value)==="object") {
+        const cname = key.split("@")[0],
+            schema = getSchema.call(this,cname);
+        return schema ? schema.create(value) : value;
+    }
+    return value;
+}
+
+async function move(key,destKey,overwrite,version,ifVersion) {
+    const entry = this.getEntry(key, {versions: true}),
+        cname = entry.value.constructor.name,
+        isObject = entry.value && typeof (entry.value) === "object",
+        schema = isObject ? getSchema.call(this, cname) : null,
+        idKey = schema ? schema.idKey : "#";
+    if(isObject && destKey) {
+        entry.value[idKey] = destKey;
+        destKey = null;
+    }
+    return this.transaction(async () => {
+        if (!await this.remove(key, version, ifVersion)) return;
+        return await this.put(destKey, entry.value, version);
+    });
+}
+
+async function patch(key,patch,version,ifVersion) {
+    const entry = this.getEntry(key, {versions: true}),
+        cname = entry.value.constructor.name,
+        isObject = entry.value && typeof (entry.value) === "object",
+        schema = isObject ? getSchema.call(this, cname) : null;
+    if(schema) {
+        return this.childTransaction(async () => {
+            if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
+                throw new Error(`Unable to patch ${key}`);
+            }
+            const id = key,
+                patchKeys = getKeys(patch),
+                entryKeys = getKeys(entry.value),
+                keysToRemove = entryKeys.filter((ekey)=> patchKeys.some((pkey) => pkey.length==ekey.length && pkey.every((item,i)=> i==pkey.length-1 || item===ekey[i]))),
+                keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
+            for(const key of keysToRemove) {
+                await this.indexDB.remove(key, id);
+            }
+            for(const key of keysToAdd) {
+                await this.indexDB.put(key,id);
+            }
+            return true;
+        });
+    }
+    return lmdbPatch.call(this,key,patch,version,ifVersion);
+}
+
+async function put(put,key,value,cname,...args) {
+    if(key==null) {
+        return this.index(value,cname,...args);
+    }
+    return await put(key,value,...args)===true ? key : undefined;
+}
+
+async function putSync(putSync,key,value,cname,...args) {
+    if(key==null) {
+        return this.indexSync(value,cname,...args);
+    }
+    return putSync(key,value,...args)===true ? key : undefined;
+}
+
+async function remove(remove,key,ifVersion) {
+    const entry = this.getEntry(key, {versions: true});
+    if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
+    return this.childTransaction(async () => {
+        if(await remove(key, ifVersion)) {
+            if(entry.value && typeof(entry.value)==="object") {
+                const value = serializeSpecial()(entry.value),
+                    id = key;
+                for(const key of getKeys(value)) {
+                    await this.indexDB.remove(key,id);
+                }
+            }
+            return key;
+        }
+    })
+}
+
+async function removeSync(removeSync,key,ifVersion) {
+    const entry = this.getEntry(key, {versions: true});
+    if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
+    return this.transactionSync ( ()=> {
+        if(removeSync(key, ifVersion)) {
+            if(entry.value && typeof(entry.value)==="object") {
+                const value = serializeSpecial()(entry.value),
+                    id = key;
+                for(const key of getKeys(value)) {
+                    this.indexDB.removeSync(key,id);
+                }
+            }
+            return key;
+        }
+    })
 }
 
 function getSchema(value,create) {
@@ -67,232 +163,290 @@ function getSchema(value,create) {
     schema.keyGenerator ||= uuid;
     schema.create ||= function (value)  {
         const instance = Object.assign(this.ctor===Array ? [] : Object.create(this.ctor.prototype),value);
-        if(this.ctor!==Array) Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
+        //if(this.ctor!==Array) Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
         return instance;
     };
     return schema;
 }
 
-function get(get,key,...args) {
-    const value = get(key);
-    if(value && typeof(value)==="object") {
-        const cname = key.split("@")[0],
-            schema = getSchema.call(this,cname);
-        return schema ? schema.create(value) : value;
+async function index(value,cname,...args) {
+    const schema = this.getSchema(cname||value);
+    if(!schema) return;
+    cname ||= schema.ctor.name;
+    const id = value[schema.idKey] ||= `${cname}@${uuid()}`;
+    return this.childTransaction(   async () => {
+        value = serializeSpecial()(null,value);
+        if(await this.put(id,value,cname,...args)) {
+            for(const key of getKeys(value)) {
+                await this.indexDB.put(key,id);
+            }
+            return id;
+        }
+    });
+}
+
+function indexSync(value,cname,...args) {
+    const schema = this.getSchema(cname||value);
+    if(!schema) return;
+    cname ||= schema.ctor.name;
+    const id = value[schema.idKey] ||= `${cname}@${uuid()}`;
+    return this.transactionSync(  () => {
+        value = serializeSpecial()(null,value);
+        if(this.putSync(id,value,cname,...args)) {
+            for(const key of getKeys(value)) {
+                this.indexDB.putSync(key,id);
+            }
+            return id;
+        }
+    });
+}
+
+function getKeys(key,value,keys= []) {
+    if(key && typeof(key)==="object" && !Array.isArray(key)) {
+        return getKeys([],key,keys);
+    }
+    const type = typeof(value);
+    if(value && type==="object") {
+        if(isRegExp(value) || value instanceof Date) {
+            keys.push([...key,value])
+        } else {
+            for(const entry of Object.entries(value)) {
+                getKeys([...key,`${entry[0]}:`],entry[1],keys);
+            }
+        }
+    } else if(type==="string") {
+        value.split(" ").forEach((token) => {
+            keys.push([...key,token])
+        })
+    } else {
+        keys.push([...key,value])
+    }
+    return keys;
+}
+
+const isRegExp = (value) => value instanceof RegExp || value.constructor.name==="RegExp";
+
+const deserializeSpecial = (key,value) => {
+    if(key!==null && typeof(key)!=="string") return deserializeSpecial(null,key);
+    if(key && value==="@undefined") return;
+    if(value==="@Infinity") return Infinity;
+    if(value==="@-Infinity") return -Infinity;
+    if(value==="@NaN") return NaN;
+    const type = typeof(value);
+    if(type==="string") {
+        const number = value.match(/^@BigInt\((.*)\)$/);
+        if(number) return new BigInt(number[1]);
+        const date = value.match(/^@Date\((.*)\)$/);
+        if(date) return new Date(parseInt(date[1]));
+        const regexp = value.match(/^@RegExp\((.*)\)$/);
+        if(regexp) {
+            const li = regexp[1].lastIndexOf("/"),
+                str = regexp[1].substring(1,li),
+                flags = regexp[1].substring(li+1);
+            return new RegExp(str,flags)
+        };
+        const symbol = value.match(/^@Symbol\((.*)\)$/);
+        if(symbol) return Symbol.for(symbol[1]);
+        return value;
+    }
+    if(value && type==="object") {
+        Object.entries(value).forEach(([key,data]) => {
+            value[key] = deserializeSpecial(key,data);
+        });
     }
     return value;
 }
 
-async function move(key,destKey,overwrite,version,ifVersion) {
-    const entry = this.getEntry(key, {versions: true});
-    if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
-    const schema = entry.value && typeof (entry.value) === "object" ? getSchema.call(this, entry.value.constructor.name) : null;
-    if (!destKey) {
-        if (schema) {
-            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
-            delete value[schema.idKey];
-            let result = false;
-            await this.childTransaction(async () => {
-                if(!(result = await this.remove(key))) return;
-                if(!(result = await this.put(null, value, version))) return ABORT;
-                result = value[schema.idKey];
-            });
-            return result;
-        }
-        destKey = uuid();
-        return await lmdbMove.call(this,key, destKey, overwrite, version) ? destKey : false;
-    } else {
-        return await lmdbMove.call(this,key,destKey,overwrite,version,ifVersion) ? destKey : false;
-        //let result = false;
-        /*await this.childTransaction(async () => {
-            if(!(result = await this.remove(key))) return;
-            if(!(result = await this.put(destKey, entry.value, version))) return ABORT;
-            result = destKey;
-        })*/
-        //return result;
-    }
-    return false;
-}
-
-async function patch(key,patch,version,ifVersion) {
-    const entry = this.getEntry(key, {versions: true});
-    if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
-    const cname = key.split("@")[0],
-        schema = getSchema.call(this,entry.value);
-    if(schema) {
-        const iname = INAME_PREFIX + cname;
-        await this.childTransaction(async () => {
-            if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
-                throw new Error(`Unable to patch ${key}`);
-            }
-            for(const [property,value] of Object.entries(patch)) {
-                const oldValue = entry.value[property];
-                if(oldValue!==undefined && oldValue!==value) {
-                    await this.remove([property, oldValue, iname, key]);
-                    await this.put([property,value,iname,key],true);
-                }
-            }
+const serializeSpecial = ({keepUndefined,keepRegExp}={}) => (key,value) => {
+    if(key!==null && typeof(key)!=="string") return serializeSpecial({keepUndefined,keepRegExp})(null,key);
+    if(keepUndefined && key && value===undefined) return "@undefined";
+    if(value===Infinity) return "@Infinity";
+    if(value===-Infinity) return "@-Infinity";
+    const type = typeof(value);
+    if(type==="symbol") return value.toString();
+    if(type==="number" && isNaN(value)) return "@NaN";
+    if(type==="bignint") return "@BigInt("+value.toString()+")";
+    if(value && type==="object") {
+        if(value instanceof Date) return "@Date("+value.getTime()+")";
+        if(isRegExp(value)) return keepRegExp ? value : "@RegExp("+value.toString()+")";
+        if(value instanceof Symbol) return "@Symbol("+value.toString()+")";
+        Object.entries(value).forEach(([key,data]) => {
+            value[key] = serializeSpecial({keepUndefined,keepRegExp})(key,data);
         });
-        return true;
     }
-    return lmdbPatch.call(this,key,patch,version,ifVersion);
+    return value;
 }
 
-async function put(put,key,value,version,ifVersion) {
-    const schema = getSchema.call(this,value);
-    if(schema) {
-        value[schema.idKey] ||= key || schema.keyGenerator();
-        value[schema.idKey]+="";
-        value[schema.idKey] = value[schema.idKey].startsWith(schema.ctor.name+"@") ? value[schema.idKey] : schema.ctor.name+"@"+value[schema.idKey]
-        if(key!=null && key!==value[schema.idKey]) throw new Error(`Key ${key} does not match id ${schema.idKey}:${value[schema.idKey]}`);
-        key = value[schema.idKey];
-        const entry = this.getEntry(key);
-        if(ifVersion && (!entry || (entry.version!==ifVersion))) return false;
-        const iname = INAME_PREFIX+value.constructor.name,
-            id = key,
-            indexKeys = schema.indexKeys || Object.keys(value),
-            keys = indexKeys.reduce((keys,property) => {
-                if(value[property]!=null) { // nulls can't be inserted because they are used as a proxy for objects
-                    const v = typeof(value[property])==="object" ? null : value[property],
-                        key = [property,v,iname,id];
-                    if(!this.get(key)) keys.push([property,v,iname,id]);
-                }
-                return keys;
-            },[]);
-        let result;
-        await this.childTransaction(async () => {
-            if(entry?.value && typeof(entry.value)==="object") {
-                for(const [k,v] of Object.entries(entry.value)) {
-                    if(value[k]!==v && (!v || typeof(v)!=="object")) {
-                        await this.remove([k,v,iname,id])
-                    }
-                }
-            }
-            for(const key of keys) {
-                result = await put(key,true);
-                if(!result) throw new Error(`Unable to index ${key} for ${id}`)
-            }
-            result = await put(id,value,version,ifVersion);
-            if(!result) throw new Error(`Unable to index ${id}`)
-        })
-        return result ? key : result;
-    } else {
-        const result = await put(key,value,version,ifVersion);
-        return result ? key : result;
-    }
-}
-
-async function remove(remove,key,ifVersion) {
-    const entry = this.getEntry(key);
-    if(!entry) return;
-    if(entry.value===null || typeof(entry.value)!=="object") {
-        return await remove(key,ifVersion);
-    }
-    const id = key,
-        iname = INAME_PREFIX+id.split("@")[0],
-        schema = getSchema.call(this,entry.value);
-    if(iname) {
-        // some underlying issue in lmdb has this throw a lot, so trap if not caused by removal of index entries
-        let result;
-        try {
-            await this.childTransaction(async () => {
-                await remove(key,ifVersion);
-                if(schema) {
-                    try {
-                        for(const [property,value] of [...Object.entries(entry.value),[schema.idKey||"#",entry.value[schema.idKey||"#"]]]) {
-                            if(!value || typeof(value)!=="object") {
-                                await remove([property,value,iname,id]);
-                            }
-                        }
-                    } catch(e) {
-                        result = e;
-                        return ABORT;
-                    }
-                }
-            });
-        } catch(e) {
-            //console.log(e);
-            if(result && typeof(result)==="object" && result instanceof Error) throw result;
+function *matchIndex(pattern,{cname,sortable}={}) {
+    const yielded = new Set(),
+        matches = new Map(),
+        keys = getKeys(serializeSpecial({keepRegExp:true})(null,pattern));
+    let i = 0;
+    for(const key of keys) {
+        const value = key.pop(),
+            type = typeof (value);
+        let arg,
+            method;
+        if (["boolean", "number", "string", "symbol"].includes(type) || value === null) {
+            arg = [...key, value];
+            method = "getValues";
+        } else {
+            arg = {start:key};
+            method = "getRange";
         }
-    }
-    return true;
-}
-
-function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.constructor.name,versions,offset,limit=Infinity}={}) {
-    if(limit!==undefined && typeof(limit)!=="number") throw new TypeError(`limit must be a number for getRangeindexMatch, got ${typeof(limit)} : ${limit}`);
-    const iname = cname===INAME_PREFIX ? (value)=>value : INAME_PREFIX+cname,
-        prefix = cname===INAME_PREFIX ? (id) => id.split("@").length===2 : (id) => id.startsWith(cname) && id[cname.length]==="@",
-        candidates = {};
-    valueMatch ||= (value) => value;
-    select ||= (value) => value;
-    let total = 0;
-    Object.entries(indexMatch).forEach(([property,value],i) => {
-        const vtype = typeof(value),
-            indexMatch = [property,value,iname];
-        let some;
-        for(const {key} of getRangeWhere.call(this,indexMatch)) {
-            if(key.length!==4) continue;
-            const id = key.pop(),
-                candidate = candidates[id];
-            if(!prefix(id)) {
-                if(some) break;
-                else continue;
+        for (const item of this.indexDB[method](arg)) {
+            const id = method === "getValues" ? item : item.value;
+            if (cname && !id.startsWith(cname+"@")) {
+                continue;
             }
-            if(vtype==="function") {
-                if(key[1]===null) { // the property had an object as a value, so not indexed
-                    const object = this.get(id);
-                    if(value(object ? object[property] : undefined)===undefined) continue;
-                } else if(value(key[1])===undefined) {
+            if (method === "getRange") {
+                if(item.key.length!==key.length+1) {
+                    continue;
+                }
+                if(key.some((part,i) => part!==item.key[i])) {
+                    break;
+                }
+                let toTest = item.key[item.key.length - 1];
+                const toTestType = typeof (toTest);
+                if (toTestType === "string" && toTest.endsWith(":")) {
+                    continue;
+                }
+                if (type === "function") {
+                    true===true; // functions always match indexes, resolved at value test, effectively a table scan
+                } else if (value && type === "object") {
+                    true===true; // objects always match indexes, resolved at value test, effectively a table scan
+                } else if (toTest !== value) {
                     continue;
                 }
             }
-            some = true;
-            if(i===0) {
-                candidates[id] = {
-                    count: 1,
-                    value: select===true ? {[property]:key[1]} : undefined
-                };
-            } else if(candidate?.count===total) {
-                candidate.count++;
-                if(select===true) Object.assign(candidate.value,{[property]:key[1]})
+            if (i === 0) {
+                if(keys.length===1 && !yielded.has(id)) {
+                    yielded.add(id);
+                    yield {id,count:1};
+                }
+                matches.set(id, 1);
+            } else {
+                let count = matches.get(id);
+                if (count >= 1) {
+                    count++;
+                    if(i===keys.length-1) {
+                        if(!yielded.has(id)) {
+                            yielded.add(id);
+                        }
+                        yield {id,count};
+                    } else {
+                        matches.set(id,count);
+                    }
+                }
             }
         }
-        total++;
-    })
-    const valueMatchType = typeof(valueMatch)
-    for(const [key,{count,value}] of Object.entries(candidates)) {
-        if(offset && offset-->0) continue;
-        const entry = this.getEntry(key,{versions});
-        if(!entry) continue;
-        let done;
-        if(select===true) {
-            const result = {key},
-                reduce = (entry) => {
-                    if(!entry.value || typeof(entry.value)!=="object") return entry.value;
-                    Object.keys(entry.value).forEach((key) => {
-                        if(value[key]==undefined) delete entry.value[key];
-                    })
-                    return entry.value;
-                };
-            if(entry.version!==undefined && versions) result.version = entry.version;
-            if(valueMatchType==="function" && valueMatch(value)!==undefined)  yield {...result,value:reduce(entry)}
-            else if(valueMatch && valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:reduce(entry)};
-            else if(valueMatch===value) yield {...result,value:reduce(entry)};
-        } else {
-            const value = entry.value,
-                result = {key};
-            if(entry.version!==undefined && versions) result.version = entry.version;
-            if(valueMatchType==="function" && valueMatch(value)!==undefined)  yield {...result,value:select(value)}
-            else if(valueMatchType==="object" && matchPattern(value,valueMatch)) yield {...result,value:select(value)};
-            else if(valueMatch===value) yield {...result,value:select(value)};
+        if(keys.length>1) {
+            for(const [id,count] of matches) {
+                if(count<=i) {
+                    matches.delete(id);
+                    if(sortable && !yielded.has(id)) {
+                        yielded.add(id);
+                        yield {id,count}
+                    }
+                }
+            }
+            if(matches.size===0) {
+                break;
+            }
         }
-        if(--limit<=0) return;
+        i++;
+    }
+}
+
+function matchValue(pattern,value,serialized) {
+    const type = typeof(pattern);
+    if(pattern && type==="object") {
+        if(isRegExp(pattern)) {
+            if(["boolean","number"].includes(typeof(value))) value += "";
+            return typeof(value)==="string" && value.match(pattern) ? value : undefined;
+        }
+        if(pattern instanceof Date) {
+            return value && type==="object" && pattern.getTime()===value.getTime() ? value : undefined;
+        }
+        for(const entry of Object.entries(pattern)) {
+            const key = entry[0];
+            // if isRegExp(key) then loop over keys on value
+            if(matchValue(entry[1],value[key],true)===undefined) {
+                return undefined;
+            }
+        }
+        return value;
+    }
+    if(type==="function") {
+        return pattern(value)!==undefined ? value : undefined;
+    }
+    return pattern===value ? value : undefined;
+}
+
+const deepCopy = (value) => {
+    const type = typeof(value);
+    if(["symbol","function"].includes(type)) {
+        return value;
+    }
+    if(type==="string") {
+        return value.split("").join("");
+    }
+    if(!value || type!=="object") {
+        return value;
+    }
+    try {
+        return structuredClone(value);
+    } catch(e) {
+        return Object.entries(value).reduce((result,[key,value]) => {
+            result[key] = deepCopy(value);
+            return result;
+        },{})
+    }
+}
+
+function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.constructor.name,fulltext,sort,sortable,limit=Infinity,offset=0}={}) {
+    if(sortable) sort = true;
+    if(!(sortable||fulltext) && !valueMatch) {
+        valueMatch ||= deepCopy(indexMatch);
+    }
+    //const matches = matchIndex.call(this,indexMatch,{cname});
+    let i = 0;
+    if (sortable||fulltext) {
+        const matches = [...matchIndex.call(this,indexMatch,{cname,sortable:sortable||fulltext})],
+            items = sortable ? matches.sort((a, b) => b.count - a.count) : matches;
+        // entries are [id,indexMatches], sort descending by count
+        for (const {id, count} of items) {
+            const entry = this.getEntry(id, {versions: true}),
+                value = deserializeSpecial(null,entry.value);
+            if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, value) !== undefined : valueMatch(value) !== undefined))) {
+                if (offset <= 0) {
+                    i++
+                    yield entry;
+                } else {
+                    offset--;
+                }
+                if (i >= limit) return;
+            }
+        }
+    } else {
+        for(const {id} of matchIndex.call(this,indexMatch,{cname})) {
+            const entry = this.getEntry(id, {versions: true});
+            if (entry && (!valueMatch || valueMatch === entry.value || typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined)) {
+                if (offset <= 0) {
+                    i++;
+                    yield entry
+                } else {
+                    offset--;
+                }
+                if (i >= limit) return;
+            }
+        }
     }
 }
 
 const withExtensions = (db,extensions={}) => {
-    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,getSchema,move,patch,put,remove,...extensions})
+    db.indexDB = db.openDB(`${db.name}.index`,{noMemInit:true,dupSort:true,encoding:"ordered-binary"});
+    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,getSchema,index,indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
-export {copy,defineSchema,get,getRangeFromIndex,getSchema,move,patch,put,remove,withExtensions,INAME_PREFIX as ANYCNAME};
-
+export {DONE,ANY,withExtensions}
