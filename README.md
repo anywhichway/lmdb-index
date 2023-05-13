@@ -25,18 +25,30 @@ class Person {
 const db = withExtensions(open("test"));
 db.defineSchema(Object);
 db.defineSchema(Person);
-const id = await db.put(null,new Person({name:"bill"}));
+const id = await db.put(null,new Person({name:"bill",age:21,address:{city:"New York",state:"NY"}}));
 if(id) {
     const person = await db.get(id);
-    if(person && person instanceof Person) {
+    // the below all log the same thing, i.e. Person {name:"bill",age:21,"#":"Person@<some uuid>"}
+    console.log(person);
+    [...db.getRangeFromIndex({name:"bill"})].forEach((person) => {
         console.log(person)
-    }
+    });
+    [...db.getRangeFromIndex({name:/bil.*/})].forEach((person) => {
+        console.log(person)
+    });
+    [...db.getRangeFromIndex({age:21})].forEach((person) => {
+        console.log(person)
+    });
+    [...db.getRangeFromIndex({age:(value) => value===21 ? value : undefined})].forEach((person) => {
+        console.log(person)
+    });
+    [...db.getRangeFromIndex({address:{city:"New York"}})].forEach((person) => {
+        console.log(person)
+    });
 }
 ```
 
 ## API
-
-Documentation is for the modified behavior of the LMDB database NOT the exported functions.
 
 ### async defineSchema(classConstructor,?options={}) - returns boolean
 
@@ -50,33 +62,37 @@ To index all top level keys on all objects using UUIDs as ids and `#` as the id 
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
-### async db.put(key,value,?version,?ifVersion) - returns boolean
+### async db.put(key,value,?cname,?version,?ifVersion) - returns boolean
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
 If `value` is an object, it will be indexed by the top level keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
 
+When putting an object for indexing, the `key` should eb `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
+
+The `cname` argument is used to specify the class name of the object being put. If `cname` is not provided, the class name is determined by the constructor name of the `value` argument. This allows the developer to use plain objects. If `value` is a primitive, `cname` is ignored.    
+
 If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
-### async db.copy(key,destKey,?overwrite,?version,?ifVersion) - returns boolean
+The `key` or in the case of objects the object id is returned if the transaction succeeds, otherwise `undefined` is returned.
+
+### async db.copy(key,?destKey,?overwrite,?version,?ifVersion) - returns boolean
 
 Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
 
 If `key` refers to an object for which there is a schema:
     - If `destKey` is nullish, the `destKey` is given a value using the schema's key generator and assigned to the object copy 
     - The copy is inserted and indexed inside a transaction
-    - The `destKey` is returned if the transaction succeeds, otherwise `false` is returned.
+    - The `destKey` is returned if the transaction succeeds, otherwise `undefined` is returned.
 
 If `key` points to a primitive:
     - If `destKey` is nullish, it given a UUIDv4 value 
     - The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
-    - The `destKey` is returned if the insertion succeeds, otherwise `false` is returned.
+    - The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
 
 Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destKey` or `false` is returned.
 
 ### async db.getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
-
-*NOTE*: `db.getRangeFromIndex` is an advanced API methods. The `select` method is far easier to use.
 
 `indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return truthy values and `DONE`.
 
@@ -84,9 +100,9 @@ Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destK
 
 ```javascript
 import {open} from "lmdb";
-import {defineSchema,get,put,remove,getRangeFromIndex,withExtensions} from "lmdb-index";
+import {withExtensions} from "lmdb-index";
 
-const db = withExtensions(open("test"),{defineSchema,get,put,remove,getRangeFromIndex});
+const db = withExtensions(open("test"));
 db.defineSchema(Object);
 await db.put(null,{message:"goodbye","#":1});
 await db.put(null,{message:"hello","#":2});
@@ -110,11 +126,11 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### withExtensions(db:lmdbDatabase,extenstions:object) - returns lmdbDatabase`
+### withExtensions(db:lmdbDatabase,?extensions:object) - returns lmdbDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
-Automatically adds `copy`, `move`, `patch` from their respective lmdb packages and `getRangeWhere` from `lmdb-query`.
+Automatically adds `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `put`, `putSync`,`remove` and `removeSync`.
 
 # Testing
 
@@ -122,8 +138,8 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |   78.23 |    66.48 |     100 |   88.27 |
-index.js |   78.23 |    66.48 |     100 |   88.27 | 30-35,46,48,88-93,105,117,200-202,231-232
+All files |   84.59 |    72.95 |   92.68 |   90.68 |
+index.js |   84.59 |    72.95 |   92.68 |   90.68 | 42-44,81,97,132-143,156,160,300,304,312,318-319,338,369,395,426,439
 
 
 # Release Notes (Reverse Chronological Order)
@@ -134,7 +150,10 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-05-13 v0.7.0 Reworked indexing to simplify and improve speed.
+
+2023-05-13 v0.7.1 Updated documentation. Not yet documented in built in full-text indexing and search.
+
+2023-05-13 v0.7.0 Reworked indexing to simplify, improve speed and support full text indexing.
 
 2023-05-06 v0.6.6 Removed test db from Git.
 
