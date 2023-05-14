@@ -33,13 +33,10 @@ async function copy(key,destKey,overwrite,version,ifVersion) {
     if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
     const cname = entry.value.constructor.name,
         schema = entry.value && typeof (entry.value) === "object" ? this.getSchema(cname) : null;
-    if (!destKey) {
-        if (schema) {
-            const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
-            delete value[schema.idKey]
-            return await this.put(null, value, version) ;
-        }
-        destKey = `${cname}@${uuid()}`;
+    if (destKey==null) {
+        const value = Object.setPrototypeOf(structuredClone(entry.value), Object.getPrototypeOf(entry.value));
+        if(schema) delete value[schema.idKey]
+        return await this.put(null, value, version);
     }
     return await lmdbCopy.call(this,key, destKey, overwrite, version, ifVersion) ? destKey : undefined;
 }
@@ -153,7 +150,7 @@ function getSchema(value,create) {
     let schema = this.schema[cname];
     if(!schema) {
         if(create) {
-            schema = defineSchema.call(this,value.constructor)
+            defineSchema.call(this,value.constructor)
         } else if(cname==="Object") {
             return;
         }
@@ -161,9 +158,8 @@ function getSchema(value,create) {
     }
     schema.idKey ||= "#";
     schema.keyGenerator ||= uuid;
-    schema.create ||= function (value)  {
+    schema.create ||= function (value)  { // this is the create function for a schema and does nto have to do with the `create` flag above to create the schema itself
         const instance = Object.assign(this.ctor===Array ? [] : Object.create(this.ctor.prototype),value);
-        //if(this.ctor!==Array) Object.defineProperty(instance,"constructor",{configurable:true,writable:true,enumerable:false,value:this.ctor});
         return instance;
     };
     return schema;
@@ -171,14 +167,15 @@ function getSchema(value,create) {
 
 async function index(value,cname,...args) {
     const schema = this.getSchema(cname||value);
-    if(!schema) return;
-    cname ||= schema.ctor.name;
-    const id = value[schema.idKey] ||= `${cname}@${uuid()}`;
+    cname ||= schema ? schema.ctor.name : value.constructor.name;
+    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
     return this.childTransaction(   async () => {
         value = serializeSpecial()(null,value);
         if(await this.put(id,value,cname,...args)) {
-            for(const key of getKeys(value)) {
-                await this.indexDB.put(key,id);
+            if(schema) {
+                for(const key of getKeys(value)) {
+                    await this.indexDB.put(key,id);
+                }
             }
             return id;
         }
@@ -202,7 +199,8 @@ function indexSync(value,cname,...args) {
 }
 
 function getKeys(key,value,keys= []) {
-    if(key && typeof(key)==="object" && !Array.isArray(key)) {
+    const keyType = typeof(key);
+    if(key && keyType==="object" && !Array.isArray(key)) {
         return getKeys([],key,keys);
     }
     const type = typeof(value);
@@ -211,7 +209,9 @@ function getKeys(key,value,keys= []) {
             keys.push([...key,value])
         } else {
             for(const entry of Object.entries(value)) {
-                getKeys([...key,`${entry[0]}:`],entry[1],keys);
+                const regExp = toRegExp(entry[0]),
+                    next = regExp ? regExp: `${entry[0]}:`;
+                getKeys([...key,next],entry[1],keys);
             }
         }
     } else if(type==="string") {
@@ -225,6 +225,15 @@ function getKeys(key,value,keys= []) {
 }
 
 const isRegExp = (value) => value instanceof RegExp || value.constructor.name==="RegExp";
+
+const toRegExp = (value) => {
+    if(value.match(/\/.*\/[gimuy]*$/)) {
+        const li = value.lastIndexOf("/"),
+            str = value.substring(1, li),
+            flags = value.substring(li + 1);
+        return new RegExp(str, flags);
+    }
+}
 
 const deserializeSpecial = (key,value) => {
     if(key!==null && typeof(key)!=="string") return deserializeSpecial(null,key);
@@ -282,35 +291,49 @@ function *matchIndex(pattern,{cname,sortable}={}) {
         matches = new Map(),
         keys = getKeys(serializeSpecial({keepRegExp:true})(null,pattern));
     let i = 0;
-    for(const key of keys) {
+    for(let key of keys) {
         const value = key.pop(),
-            type = typeof (value);
+            type = typeof (value),
+            start = key.map((part) => {
+                if(part && typeof(part)==="object" && part instanceof RegExp) {
+                    return null;
+                }
+                return part;
+            });
         let arg,
             method;
-        if (["boolean", "number", "string", "symbol"].includes(type) || value === null) {
-            arg = [...key, value];
+        if (start.length+1===key.length && ["boolean", "number", "string", "symbol"].includes(type) || value === null) {
+            arg = [...start, value];
             method = "getValues";
         } else {
-            arg = {start:key};
+            arg = {start};
             method = "getRange";
         }
         for (const item of this.indexDB[method](arg)) {
-            const id = method === "getValues" ? item : item.value;
+            const id = method === "getValues" ? item : item.value; // id is value when using getRange since getRange is accessing index
             if (cname && !id.startsWith(cname+"@")) {
                 continue;
             }
             if (method === "getRange") {
-                if(item.key.length!==key.length+1) {
+                if(item.key.length!==start.length+1) {
                     continue;
                 }
-                if(key.some((part,i) => part!==item.key[i])) {
+                let wasRegExp;
+                if(key.some((part,i) => {
+                    if(part && typeof(part)==="object") {
+                        const key = item.key[i];
+                        if(part instanceof RegExp && !part.test(key.substring(0,key.length-1))) {
+                            wasRegExp = true;
+                            return true;
+                        }
+                    } else if(part!==item.key[i]) {
+                        return true;
+                    }
+                })) {
+                    if(wasRegExp) continue;
                     break;
                 }
                 let toTest = item.key[item.key.length - 1];
-                const toTestType = typeof (toTest);
-                if (toTestType === "string" && toTest.endsWith(":")) {
-                    continue;
-                }
                 if (type === "function") {
                     true===true; // functions always match indexes, resolved at value test, effectively a table scan
                 } else if (value && type === "object") {
@@ -370,8 +393,16 @@ function matchValue(pattern,value,serialized) {
         }
         for(const entry of Object.entries(pattern)) {
             const key = entry[0];
-            // if isRegExp(key) then loop over keys on value
-            if(matchValue(entry[1],value[key],true)===undefined) {
+            const regExp = toRegExp(key);
+            if(regExp) {
+                for(const [key,v] of Object.entries(value)) {
+                    if(regExp.test(key)) {
+                        if(matchValue(entry[1],v,serialized)===undefined) {
+                            return
+                        }
+                    }
+                }
+            } else if(matchValue(entry[1],value[key],true)===undefined) {
                 return undefined;
             }
         }
@@ -404,7 +435,39 @@ const deepCopy = (value) => {
     }
 }
 
-function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.constructor.name,fulltext,sort,sortable,limit=Infinity,offset=0}={}) {
+const selector = (value,pattern,{root=value,parent,key}={}) => {
+    const type = typeof(pattern);
+    if(type==="function") {
+        return pattern(value,{root,parent,key});
+    }
+    if(value && type==="object") {
+        if(isRegExp(pattern)) {
+            if(typeof(value)==="string") {
+                const matches = value.match(pattern)||[];
+                return matches[1];
+            }
+            return;
+        }
+        if(pattern instanceof Date) {
+            return value && type==="object" && pattern.getTime()===value.getTime() ? value : undefined;
+        }
+        const selected = value.constructor===Array ? [] : Object.create(value.constructor.prototype);
+        for(const entry of Object.entries(pattern)) {
+            const key = entry[0];
+            // if isRegExp(key) then loop over keys on value
+            let result;
+            if((result = selector(value[key],entry[1],{root,parent:value,key}))===undefined) {
+                return;
+            }
+            selected[key] = result;
+        }
+        return selected;
+    }
+    return pattern===value ? value : undefined;
+}
+
+function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,sort,sortable,limit=Infinity,offset=0}={}) {
+    cname ||= indexMatch.constructor.name!=="Object" ? indexMatch.constructor.name : undefined;
     if(sortable) sort = true;
     if(!(sortable||fulltext) && !valueMatch) {
         valueMatch ||= deepCopy(indexMatch);
@@ -413,14 +476,17 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
     let i = 0;
     if (sortable||fulltext) {
         const matches = [...matchIndex.call(this,indexMatch,{cname,sortable:sortable||fulltext})],
-            items = sortable ? matches.sort((a, b) => b.count - a.count) : matches;
+            items = sortable ? matches.sort(typeof(sort)==="function" ? sort : (a, b) => b.count - a.count) : matches;
         // entries are [id,indexMatches], sort descending by count
         for (const {id, count} of items) {
             const entry = this.getEntry(id, {versions: true}),
                 value = deserializeSpecial(null,entry.value);
             if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, value) !== undefined : valueMatch(value) !== undefined))) {
                 if (offset <= 0) {
-                    i++
+                    i++;
+                    if(select) {
+                        entry.value = selector(entry.value,select);
+                    }
                     yield entry;
                 } else {
                     offset--;
@@ -434,7 +500,10 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname=indexMatch.const
             if (entry && (!valueMatch || valueMatch === entry.value || typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined)) {
                 if (offset <= 0) {
                     i++;
-                    yield entry
+                    if(select) {
+                        entry.value = selector(entry.value,select);
+                    }
+                    yield entry;
                 } else {
                     offset--;
                 }

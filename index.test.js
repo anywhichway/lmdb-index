@@ -85,6 +85,16 @@ test("getRangeFromIndex",() => {
     expect(range[0].value).toEqual(person);
 })
 
+test("getRangeFromIndex with select",() => {
+    const range = [...db.getRangeFromIndex({name:"joe",age:21},null, {name:/(.).*/,age:(value)=>value,created:now},{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name).toBe("j");
+    expect(range[0].value.age).toBe(21);
+    expect(range[0].value.created.getTime()).toBe(now.getTime());
+    expect(Object.keys(range[0].value).length).toBe(3);
+})
+
 test("getRangeFromIndex - with function",() => {
     const range = [...db.getRangeFromIndex({name:"joe",age:(value) => value===21 ? value : undefined},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
@@ -104,6 +114,24 @@ test("getRangeFromIndex - with RegExp",() => {
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
     expect(range[0].value.name).toBe("joe");
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
+
+test("getRangeFromIndex - with RegExp Key",() => {
+    const range = [...db.getRangeFromIndex({[/name/]:"joe"},null,null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name).toBe("joe");
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
+
+test("getRangeFromIndex - with value match",() => {
+    const range = [...db.getRangeFromIndex({name:"joe"}, {created:now},null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.created.getTime()).toBe(now.getTime());
     delete range[0].value["#"];
     expect(range[0].value).toEqual(person);
 })
@@ -142,6 +170,32 @@ test("put",async () => {
     expect(range.every((item) => item.value instanceof Person)).toBe(true);
 })
 
+test("offset",() => {
+    const p = new Person(person),
+        range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person",offset:1})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    delete range[0].value["#"];
+    delete range[0].value.created;
+    delete range[0].value.aRegExp;
+    delete p.created;
+    delete p.aRegExp;
+    expect(range[0].value).toEqual(p);
+})
+
+test("offset sortable",() => {
+    const p = new Person(person),
+        range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person",sortable:true,offset:1})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    delete range[0].value["#"];
+    delete range[0].value.created;
+    delete range[0].value.aRegExp;
+    delete p.created;
+    delete p.aRegExp;
+    expect(range[0].value).toEqual(p);
+})
+
 test("copy",async () => {
     const id = await db.copy(personId);
     expect(id.startsWith("Person@")).toBe(true);
@@ -157,6 +211,22 @@ test("copy",async () => {
     expect(range.every((item) => item.value instanceof Person)).toBe(true);
 })
 
+test("copy schemaless object auto id",async () => {
+    const id = await db.put(null,{name:"joe",age:21}),
+        newid  = await db.copy(id),
+        value = db.get(newid);
+    expect(value).toEqual({name:"joe",age:21,"#":newid});
+})
+
+test("copy primitive",async () => {
+    const id = await db.put("myfirstprimitive",1),
+        newid  = await db.copy("myfirstprimitive","mysecondprimitive"),
+        value = db.get("mysecondprimitive");
+    expect(id).toBe("myfirstprimitive");
+    expect(newid).toBe("mysecondprimitive");
+    expect(value).toBe(1);
+})
+
 test("patch",async () => {
     const result = await db.patch(personId,{age:22});
     expect(result).toBe(true);
@@ -166,6 +236,14 @@ test("patch",async () => {
     const range = [...db.getRangeFromIndex({age:22},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range.every((item) => item.value instanceof Person && item.value.age===22)).toBe(true);
+})
+
+test("patch schemaless object",async () => {
+    const id = await db.put(null,{name:"joe",age:21}),
+        result = await db.patch(id,{age:22}),
+        value = db.get(id);
+    expect(result).toBe(id);
+    expect(value).toEqual({name:"joe",age:22,"#":id});
 })
 
 test("move",async () => {
@@ -182,6 +260,43 @@ test("remove",async () => {
     const range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
     expect(range.length).toBe(2);
     expect(range.every((item) => item.value instanceof Person && item.value["#"]!=="Person@joe")).toBe(true);
+})
+
+test("removeSync",async () => {
+    const id = await db.put(null,{...person});
+    expect(db.get(id)).toBeTruthy()
+    db.removeSync(id);
+    expect(db.get(id)).toBeFalsy();
+    const range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})];
+    expect(range.length).toBe(2);
+    expect(range.every((item) => item.value instanceof Person && item.value["#"]!==id)).toBe(true);
+})
+
+test("autocreate schema",async () => {
+    class Book {
+        constructor(config) {
+            Object.assign(this,config)
+        }
+    }
+    const schema = db.getSchema(new Book(),true);
+    expect(schema).toBeInstanceOf(Object);
+    expect(schema.ctor.name).toBe("Book");
+})
+
+test("get object of class with similar attributes",async () => {
+    class Book {
+        constructor(config) {
+            Object.assign(this,config)
+        }
+    }
+    const schema = db.defineSchema(Book),
+        book = new Book({name:"joe"});
+    const id = await db.put(null,book);
+    const range1 = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Book"})];
+    expect(range1.length).toBe(1);
+    const range2 = [...db.getRangeFromIndex({name:"joe"})];
+    expect(range2.length).toBe(3);
+    expect(range2.some((item) => item.value instanceof Book || item.value instanceof Person)).toBe(true);
 })
 
 

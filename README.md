@@ -78,33 +78,67 @@ To index all top level keys on all objects using UUIDs as ids and `#` as the id 
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
-### db.getSchema(value:string|object) - returns object representing schema
+### db.getSchema(value:string|object,create:boolean) - returns object representing schema
 
 Returns the schema for the class of the object or `undefined`.
 
-### async db.getRangeFromIndex(indexMatch,?valueMatch,?select,{cname=indexMatch.constructor.name,sortable,fulltext,sort,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
+
+### async db.getRangeFromIndex(indexMatch,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+
+Yields objects of the form `{key,value,count}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches.
 
 `indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return non-undefined values or `DONE`.
 
-`cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch`. To query across all classes use the export `ANYCNAME` for `cname`
+`valueMatch` defaults to the same value as `indexMatch`. However, it can also be a function that accepts a candidate match and returns the candidate if is satisfies certain conditions or `undefined` if not. Or, it can be a different pattern matching object that is perhaps more restrictive.
 
-`sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches. `sortable` and `fulltext` return entries in the order they are indexed. `sort` returns entries based on how many index matches occurred, with the highest first.
+`select` is a function or object that is used to select which properties of the object are returned. If `select` is an object, then the properties of the `select` are used as keys to select properties from the match. The values of these properties can be literals, RegExp, or functions. Functions returning `undefined` or RegExp and literals that do not match drop properties. If `select` is a function, then it is called with the object as the first argument and the result is used. For example:
 
 ```javascript
-import {open} from "lmdb";
-import {withExtensions} from "lmdb-index";
-
-const db = withExtensions(open("test"));
-db.defineSchema(Object);
-await db.put(null,{message:"goodbye","#":1});
-await db.put(null,{message:"hello","#":2});
-console.log([...db.getRangeFromIndex({message:"hello"})]); // logs one
-console.log([...db.getRangeFromIndex({message(value) { return value!=null }})]); // 
+[...db.getRangeFromIndex({name:"bill",age:21},null,{name:/(.).*/,age:(value)=>value})].forEach((person) => {
+    console.log(person) // logs {name:"b",age:21}
+});
 ```
+
+`cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch` except if `indexMatch` is just an `Object`. If `indexMatch` is an `Object` and no `cname` is provided, then the match is done across multiple classes, e.g.
+
+```javascript
+class Person { constuctor(config={}) { Object.assign(this,config); } }
+class Pet { constuctor(config={}) { Object.assign(this,config); } }
+db.defineSchema(Person);
+db.defineSchema(Pet);
+await db.put(null,new Person({name:"bill",age:21}));
+await db.put(null,new Pet({name:"bill",age:2}));
+[...db.getRangeFromIndex({name:"bill"})].forEach((object) => {
+    console.log(object); // logs both the Person and the Pet
+});
+[...db.getRangeFromIndex({name:"bill"},null,null,{cname:"Person"})].forEach((object) => {
+    console.log(object); // logs just the Person
+});
+```
+
+`sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches. 
+
+`sortable` and `fulltext` return entries in the order they are indexed.
+
+`fulltext` (short for full text index), returns entries that have partial matches for string property values, e.g.
+
+```javascript
+db.put(null,{name:"bill",address:{city:"New York",state:"NY"}});
+db.put(null,{name:"joe",address:{city:"York",state:"PA"}});
+[...db.getRangeFromIndex({address:{city:"York"}},null,null,{fulltext:true})].forEach((person) => {
+    console.log(person); // logs both bill and joe
+});
+```
+
+If `sort` is `true` entries are returned based on how many index matches occurred, with the highest first. If `sort` is a function, then entries are returned in the order determined by the function. Note, both of these are expensive since they require resolving all matches first.
+
 
 ### async db.index(object:object,?cname,?version,?ifVersion) - returns LMDBKey|undefined
 
 Puts the object in the database and indexes it inside a single transaction. Returns the object's id if successful, otherwise `undefined`.
+
+Called by `db.put(null,value)`
 
 ### async db.move(key,destKey,?overwrite,?version,?ifVersion) - returns LMDBKey|undefined
 
@@ -150,8 +184,8 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |   84.59 |    72.95 |   92.68 |   90.68 |
-index.js |   84.59 |    72.95 |   92.68 |   90.68 | 42-44,81,97,132-143,156,160,300,304,312,318-319,338,369,395,426,439
+All files |   91.12 |    80.39 |     100 |   96.65 |
+index.js |   91.12 |    80.39 |     100 |   96.65 | 78,301,311-312,331,388,411,422,428,450
 
 
 # Release Notes (Reverse Chronological Order)
@@ -162,6 +196,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+
+2023-05-14 v0.7.3 Added unit tests. Corrected issues with: copy not adding id to objects that have no schema, selecting objects of multiple class types at the same time, select support being dropped during an earlier upgrade, sort as function. Updated documentation.
 
 2023-05-14 v0.7.2 Updated documentation.
 
