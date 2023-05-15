@@ -1,5 +1,12 @@
 # lmdb-index
-Object indexing and index based queries for LMDB. Also provides, automatic id generation, instantiation of returned objects as instances of their original classes.
+
+- object indexing for LMDB,
+- index based queries using literals, functions, and regular expressions,
+- over 60 pre-built predicate functions for use in queries, e.g. `$lte`, `$eq`, `$gte`, `$echoes` (soundex), `$includes`,
+- automatic id generation,
+- instantiation of returned objects as instances of their original classes,
+- copy, move, and patch operations,
+- ACID transactions.
 
 This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
@@ -15,7 +22,9 @@ npm install lmdb-index
 
 ```javascript
 import {open} from "lmdb";
-import {withExtensions} from "lmdb-index";
+import {withExtensions,operators} from "lmdb-index";
+
+const {$gte} = operators;
 
 class Person {
     constructor(config={}) {
@@ -36,13 +45,16 @@ if(id) {
     [...db.getRangeFromIndex({name:/bil.*/})].forEach((person) => {
         console.log(person)
     });
-    [...db.getRangeFromIndex({age:21})].forEach((person) => {
+    [...db.getRangeFromIndex({age:$gte(21)})].forEach((person) => {
         console.log(person)
     });
     [...db.getRangeFromIndex({age:(value) => value===21 ? value : undefined})].forEach((person) => {
         console.log(person)
     });
-    [...db.getRangeFromIndex({address:{city:"New York"}})].forEach((person) => {
+    [...db.getRangeFromIndex({
+        name:(value) => value!=null ? value : undefined,
+        address:{city:"New York"}
+    })].forEach((person) => {
         console.log(person)
     });
 }
@@ -50,12 +62,12 @@ if(id) {
 
 ## API
 
-### async db.copy(key,?destKey,?overwrite,?version,?ifVersion) - returns boolean
+### async db.copy(key:LMDBKey,?destKey:LMDBKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey
 
 Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
 
 If `key` refers to an object for which there is a schema:
-- If `destKey` is nullish, the `destKey` is given a value using the schema's key generator and assigned to the object copy
+- If `destKey` is nullish, the `destKey` is given a value using the schema's key generator or a UUIDv4 value if no key generator is defined.
 - The copy is inserted and indexed inside a transaction
 - The `destKey` is returned if the transaction succeeds, otherwise `undefined` is returned.
 
@@ -64,17 +76,15 @@ If `key` points to a primitive:
 - The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
 - The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
 
-Otherwise, the copy is inserted at the `destKey`, no indexing occurs, the `destKey` or `false` is returned.
+### async db.defineSchema(classConstructor:function|class,?options={}) - returns boolean
 
-### async db.defineSchema(classConstructor,?options={}) - returns boolean
-
-- The key names in the array `options.indexKeys` will be indexed. If no value is provided, all top level keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
+- The key names in the array `options.indexKeys` will be indexed. Nested keys use dot notation. If no value is provided, all keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
 - If the property `options.idKey` is provided, its value will be used for unique ids. If `options.idKey` is not provided, the property `#` on instances will be used for unique ids.
 - If the property `options.keyGenerator` is provided, its value should be a function that returns a unique id. If `options.keyGenerator` is not provided, a v4 UUID will be used.
 
 The `options` properties and values are inherited by child schema, i.e. if you define them for `Object`, then you do not need to provide them for other classes.
 
-To index all top level keys on all objects using UUIDs as ids and `#` as the id key, call `db.defineSchema(Object)`.
+To index all keys on all objects using UUIDs as ids and `#` as the id key, call `db.defineSchema(Object)`.
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
@@ -84,20 +94,36 @@ Returns the schema for the class of the object or `undefined`.
 
 If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
 
-### async db.getRangeFromIndex(indexMatch,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
-Yields objects of the form `{key,value,count}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches.
+Yields objects of the form `{key,value,count,version}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches, `version` is the version number and is only present if the database was opened using versioning.
 
-`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return non-undefined values or `DONE`.
-
-`valueMatch` defaults to the same value as `indexMatch`. However, it can also be a function that accepts a candidate match and returns the candidate if is satisfies certain conditions or `undefined` if not. Or, it can be a different pattern matching object that is perhaps more restrictive.
-
-`select` is a function or object that is used to select which properties of the object are returned. If `select` is an object, then the properties of the `select` are used as keys to select properties from the match. The values of these properties can be literals, RegExp, or functions. Functions returning `undefined` or RegExp and literals that do not match drop properties. If `select` is a function, then it is called with the object as the first argument and the result is used. For example:
+`indexMatch` is an object with keys that may be serialized RegExp and values that may be literals, or RegExp or functions that return non-undefined values or `DONE`. For example:
 
 ```javascript
-[...db.getRangeFromIndex({name:"bill",age:21},null,{name:/(.).*/,age:(value)=>value})].forEach((person) => {
-    console.log(person) // logs {name:"b",age:21}
-});
+{
+    name: /bil.*/,
+    age: $gte(21), // this is the same as (value) => value>=21 ? value : undefined,
+    address: {
+        city: "New York"
+    },
+    [/.*Identifier/]: (value) => value!=null ? value : undefined
+}
+```
+
+The standard form for functions used in queries is `(value) => ... some code that returns a value or undefined or DONE`. These can be quite verbose, so over 60 pre-built functions are provided in the section [Operators](#operators).
+
+`valueMatch` defaults to the same value as `indexMatch` because some of the processing required can't actually be done against indexes, underlying values must be retrieved. However, it can also be a function that accepts a candidate match and returns the candidate if is satisfies certain conditions or `undefined` if not. Or, it can be a different pattern matching object that is perhaps more restrictive.
+
+`select` is a function or object that is used to select which properties of the object are returned. If `select` is an object, then the properties of the `select` are used as keys to select properties from the match. The properties may be serialized RegExp. The values of these properties can be literals, RegExp, or functions. 
+
+Functions returning `undefined` or RegExp and literals that do not match drop properties. Functions are called with the object as the first argument and `{root,parent,key}` as the second. For example:
+
+```javascript
+{
+    name: (value,{root}) => { root.firstInitial = value.match(/(.).*/)[1] }
+    [/.*Identifier/]: (value) => value!=null ? value : undefined
+}
 ```
 
 `cname` is the name of the class to query. It defaults to the constructor name of the `indexMatch` except if `indexMatch` is just an `Object`. If `indexMatch` is an `Object` and no `cname` is provided, then the match is done across multiple classes, e.g.
@@ -134,29 +160,29 @@ db.put(null,{name:"joe",address:{city:"York",state:"PA"}});
 If `sort` is `true` entries are returned based on how many index matches occurred, with the highest first. If `sort` is a function, then entries are returned in the order determined by the function. Note, both of these are expensive since they require resolving all matches first.
 
 
-### async db.index(object:object,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+### async db.index(object:object,?cname:string,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
-Puts the object in the database and indexes it inside a single transaction. Returns the object's id if successful, otherwise `undefined`.
+Puts the object in the database and indexes it inside a transaction. Returns the object's id if successful, otherwise `undefined`.
 
 Called by `db.put(null,value)`
 
-### async db.move(key,destKey,?overwrite,?version,?ifVersion) - returns LMDBKey|undefined
+### async db.move(key:lmdbKey,destKey:lmdbKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Works similar to [lmdb-move](https://github.com/anywhichway/lmdb-move) but provides automatic key assignment and indexing.
 
 Works the same as `copy` above, except the entry at the original `key` is removed inside the transaction.
 
-### async db.patch(key,patch,?version,?ifVersion) - returns boolean
+### async db.patch(key:string,patch:object,?version,?ifVersion) - returns boolean
 
 Inside a single transaction, updates the index after the patch.
 
 Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
-### async db.put(key,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+### async db.put(key:LMDBKey,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
-If `value` is an object, it will be indexed by the top level keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
 
 When putting an object for indexing, the `key` should eb `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
@@ -168,15 +194,93 @@ The `key` or in the case of objects the object id is returned if the transaction
 
 See `db.index` to avoid the need for a `null` first argument and more information.
 
-### async db.remove(key,?version,?ifVersion) - returns LMDBKey|undefined
+### async db.remove(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### withExtensions(db:lmdbDatabase,?extensions:object) - returns LMDBDatabase`
+### withExtensions(db:LMDBDatabase,?extensions:object) - returns LMDBDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
 Automatically adds `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `put`, `putSync`,`remove` and `removeSync`.
+
+## Operators
+
+The following operators are supported in `indexMatch` and `indexKeys`:
+
+* `$and(...)` - logical and
+* `$or(...)` - logical or
+* `$not(...)` - logical not
+
+
+* `$lt(boolean|number|string)` - less than
+* `$lte(boolean|number|string)` - less than or equal to
+* `$gt(boolean|number|string)` - greater than
+* `$gte(boolean|number|string)` - greater than or equal to
+* `$eq(boolean|number|string)` - equal to
+* `$eeq(boolean|number|string)` - equal to and same type, e.g. `1` is not equal to `'1'
+* `$neq(boolean|number|string)` - not equal to
+
+
+* `$startsWith(string)` - property value starts with string
+* `$endsWith(string)` - property value ends with string
+
+
+* `$in(array)` - property value is in array
+* `$nin(array)` - property values is not in array
+* `$includes(boolean|number|string|null)` - property value is an array and includes value
+* `$excludes(boolean|number|string|null)` - property value is an array and does not include value
+* `$intersects(array)` - property value is an array and intersects with array
+* `$disjoint(array)` - property value is an array and does not intersect with array
+* `$subset(array)` - property value is an array and is a subset of array
+* `$superset(array)` - property value is an array and is a superset of array
+* `$symmetric(array)` - property value is an array and has same elements as array
+
+
+* `$between(boolean|number|string,boolean|number|string)` - property value is between the two values (inclusive)
+* `$outside(boolean|number|string,boolean|number|string)` - property value is not between the two values (exclusive)
+
+
+* `$matches(RegExp)` - property value matches regular expression
+* `$echoes(string)` - property value sounds like the `string`
+
+
+* `$type(typeName:string)` - property value is of `typeName` type
+* `$isOdd()` - property value is odd
+* `$isEven()` - property value is even
+* `$isPrime()` - property value is prime
+* `$isComposite()` - property value is composite
+* `$isPositive()` - property value is positive
+* `$isNegative()` - property value is negative
+* `$isInteger()` - property value is an integer
+* `$isFloat()` - property value is a float
+* `$isNaN()` - property value is not a number
+
+
+* `$isTruthy()` - property value is truthy
+* `$isFalsy()` - property value is falsy
+
+
+* `$isUndefined()` - property value is undefined
+* `$isNull()` - property value is null
+
+
+* `$isArray()` - property value is an array
+* `$isObject()` - property value is an object
+* `$isPrimitive()` - property value is a primitive
+
+
+* `$isCreditCard()` - property value is a credit card number
+* `$isEmail()` - property value is an email address
+* `$isHexColor()` - property value is a hex color
+* `$isIPV4Address()` - property value is an IP address
+* `$isIPV6Address()` - property value is an IP address
+* `$isISBN()` - property value is an ISBN
+* `$isMACAddress()` - property value is a MAC address
+* `$isURL()` - property value is a URL
+* `$isUUID()` - property value is a UUID
+* `$isZIPCode()` - property value is a ZIP code
+
 
 # Testing
 
@@ -184,8 +288,11 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files |   91.12 |    80.39 |     100 |   96.65 |
-index.js |   91.12 |    80.39 |     100 |   96.65 | 78,301,311-312,331,388,411,422,428,450
+All files       |   88.05 |    82.99 |   94.48 |   91.91 |
+lmdb-index     |   85.28 |    75.75 |   88.13 |   90.16 |
+index.js      |   85.28 |    75.75 |   88.13 |   90.16 | ...5,359,367,377-386,392-402,426,451,470-474,495,517,566-569
+lmdb-index/src |     100 |    97.91 |     100 |     100 |
+operators.js  |     100 |    97.91 |     100 |     100 | 10,186,190-191
 
 
 # Release Notes (Reverse Chronological Order)
@@ -196,6 +303,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-05-15 v0.8.0 Updated documentation. Corrected issue with `indexKeys` on schema not being processed, select processing not handling `root` assignment and removal of unselected properties. Supplied a range of pre-built operator functions for index and value matching.
 
 2023-05-14 v0.7.3 Added unit tests. Corrected issues with: copy not adding id to objects that have no schema, selecting objects of multiple class types at the same time, select support being dropped during an earlier upgrade, sort as function. Updated documentation.
 

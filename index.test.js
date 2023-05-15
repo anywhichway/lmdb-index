@@ -1,18 +1,7 @@
 import {open} from "lmdb";
-import {withExtensions} from "./index.js";
+import {withExtensions,operators} from "./index.js";
 
-const benchmark = await import("./node_modules/benchmark/benchmark.js"),
-    Benchmark = benchmark.default;
-
-/*const db = Object.assign(open("test.db",{noMemInit:true}),{
-    defineSchema,
-    getSchema,
-    index,
-    indexSync,
-    getRangeFromIndex
-})
- */
-
+const {$gt,$gte,$eq,$neq,$and,$or} = operators;
 
 const db = withExtensions(open("test.db",{noMemInit:true}));
 
@@ -26,12 +15,12 @@ db.indexDB = db.openDB("index",{noMemInit:true,dupSort:true,encoding:"ordered-bi
 db.clearSync();
 db.indexDB.clearSync();
 const now = new Date(),
-    personSchema = db.defineSchema(Person),
+    personSchema = db.defineSchema(Person,{indexKeys:["name","address.city","address.state","created","aRegExp"]}),
     person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/},
     personId = await db.indexSync({...person},"Person");
 
 test("redefine Schema",() => {
-    const schema = db.defineSchema(personSchema.ctor);
+    const schema = db.defineSchema(personSchema.ctor,{indexKeys:["name","address.city","address.state","created","aRegExp"]});
     expect(schema).toBe(personSchema)
 })
 
@@ -85,11 +74,25 @@ test("getRangeFromIndex",() => {
     expect(range[0].value).toEqual(person);
 })
 
-test("getRangeFromIndex with select",() => {
-    const range = [...db.getRangeFromIndex({name:"joe",age:21},null, {name:/(.).*/,age:(value)=>value,created:now},{cname:"Person"})];
+test("getRangeFromIndex with operator",() => {
+    const range = [...db.getRangeFromIndex({name:$or($eq("joe"),$neq("joe")),age:$and($gte(21),$gt(20))},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
-    expect(range[0].value.name).toBe("j");
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
+
+test("getRangeFromIndex with select",() => {
+    const range = [...db.getRangeFromIndex({name:/joe/,age:21},null, {
+        name(value,{root}) {
+            root.firstInitial = value.match(/(.).*/)[1]
+        },
+        age:(value)=>value,
+        created:now
+    },{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.firstInitial).toBe("j");
     expect(range[0].value.age).toBe(21);
     expect(range[0].value.created.getTime()).toBe(now.getTime());
     expect(Object.keys(range[0].value).length).toBe(3);
@@ -233,7 +236,7 @@ test("patch",async () => {
     const value = db.get(personId);
     expect(value).toBeInstanceOf(Person);
     expect(value.age).toBe(22);
-    const range = [...db.getRangeFromIndex({age:22},null,null,{cname:"Person"})];
+    const range = [...db.getRangeFromIndex({name:"joe",age:22},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range.every((item) => item.value instanceof Person && item.value.age===22)).toBe(true);
 })

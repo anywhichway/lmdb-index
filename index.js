@@ -17,15 +17,35 @@ import {copy as lmdbCopy} from "lmdb-copy";
 import {move as lmdbMove} from "lmdb-move";
 import {patch as lmdbPatch} from "lmdb-patch";
 import {v4 as uuid} from "uuid";
+import {operators} from "./src/operators.js";
+
+var STOPWORDS = [
+    'a', 'about', 'after', 'ala', 'all', 'also', 'am', 'an', 'and', 'another', 'any', 'are',
+    'around','as', 'at', 'be',
+    'because', 'been', 'before', 'being', 'between', 'both', 'but', 'by', 'came', 'can',
+    'come', 'could', 'did', 'do', 'each', 'for', 'from', 'get', 'got', 'has', 'had',
+    'he', 'have', 'her', 'here', 'him', 'himself', 'his', 'how', 'i', 'if', 'iff', 'in',
+    'include', 'into',
+    'is', 'it', 'like', 'make', 'many', 'me', 'might', 'more', 'most', 'much', 'must',
+    'my', 'never', 'now', 'of', 'on', 'only', 'or', 'other', 'our', 'out', 'over',
+    'said', 'same', 'see', 'should', 'since', 'some', 'still', 'such', 'take', 'than',
+    'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
+    'through', 'to', 'too', 'under', 'up', 'very', 'was', 'way', 'we', 'well', 'were',
+    'what', 'where', 'which', 'while', 'who', 'with', 'would', 'you', 'your'];
+
+const tokenize = (value,isObject) => (value.replace(new RegExp(`[^A-Za-z0-9\\s${isObject ? "\:" : ""}]`,"g"),"").replace(/  +/g," ").toLowerCase().split(" "));
 
 function defineSchema(ctor,options={}) {
     // {indexKeys:["name","age"],name:"Person",idKey:"#"}
     let name;
     this.schema ||= {};
     options.ctor = ctor;
-    this.schema[ctor.name] ||= {};
-    Object.assign(this.schema[ctor.name],options);
-    return this.schema[ctor.name];
+    const schema = this.schema[ctor.name] ||= {};
+    Object.assign(schema,options);
+    if(schema.indexKeys) {
+        schema.indexKeys = schema.indexKeys.map((key)=>key.split(".").map((part)=>part+=":").join("."));
+    }
+    return schema;
 }
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
@@ -78,8 +98,8 @@ async function patch(key,patch,version,ifVersion) {
                 throw new Error(`Unable to patch ${key}`);
             }
             const id = key,
-                patchKeys = getKeys(patch),
-                entryKeys = getKeys(entry.value),
+                patchKeys = getKeys(patch,schema.indexKeys),
+                entryKeys = getKeys(entry.value,schema.indexKeys),
                 keysToRemove = entryKeys.filter((ekey)=> patchKeys.some((pkey) => pkey.length==ekey.length && pkey.every((item,i)=> i==pkey.length-1 || item===ekey[i]))),
                 keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
             for(const key of keysToRemove) {
@@ -111,12 +131,13 @@ async function putSync(putSync,key,value,cname,...args) {
 async function remove(remove,key,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
+    const schema = this.getSchema(entry.value?.constructor?.name);
     return this.childTransaction(async () => {
         if(await remove(key, ifVersion)) {
             if(entry.value && typeof(entry.value)==="object") {
                 const value = serializeSpecial()(entry.value),
                     id = key;
-                for(const key of getKeys(value)) {
+                for(const key of getKeys(value,schema?.indexKeys)) {
                     await this.indexDB.remove(key,id);
                 }
             }
@@ -128,12 +149,13 @@ async function remove(remove,key,ifVersion) {
 async function removeSync(removeSync,key,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
+    const schema = this.getSchema(entry.value?.constructor?.name)
     return this.transactionSync ( ()=> {
         if(removeSync(key, ifVersion)) {
             if(entry.value && typeof(entry.value)==="object") {
                 const value = serializeSpecial()(entry.value),
                     id = key;
-                for(const key of getKeys(value)) {
+                for(const key of getKeys(value,schema?.indexKeys)) {
                     this.indexDB.removeSync(key,id);
                 }
             }
@@ -173,7 +195,7 @@ async function index(value,cname,...args) {
         value = serializeSpecial()(null,value);
         if(await this.put(id,value,cname,...args)) {
             if(schema) {
-                for(const key of getKeys(value)) {
+                for(const key of getKeys(value,schema.indexKeys)) {
                     await this.indexDB.put(key,id);
                 }
             }
@@ -190,7 +212,7 @@ function indexSync(value,cname,...args) {
     return this.transactionSync(  () => {
         value = serializeSpecial()(null,value);
         if(this.putSync(id,value,cname,...args)) {
-            for(const key of getKeys(value)) {
+            for(const key of getKeys(value,schema.indexKeys)) {
                 this.indexDB.putSync(key,id);
             }
             return id;
@@ -198,10 +220,10 @@ function indexSync(value,cname,...args) {
     });
 }
 
-function getKeys(key,value,keys= []) {
+function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
     const keyType = typeof(key);
     if(key && keyType==="object" && !Array.isArray(key)) {
-        return getKeys([],key,keys);
+        return getKeys([],key,value,keys);
     }
     const type = typeof(value);
     if(value && type==="object") {
@@ -211,14 +233,16 @@ function getKeys(key,value,keys= []) {
             for(const entry of Object.entries(value)) {
                 const regExp = toRegExp(entry[0]),
                     next = regExp ? regExp: `${entry[0]}:`;
-                getKeys([...key,next],entry[1],keys);
+                getKeys( [...key,next],entry[1],schemaKeys,keys,!!regExp);
             }
         }
     } else if(type==="string") {
-        value.split(" ").forEach((token) => {
-            keys.push([...key,token])
+        tokenize(value).filter((token) => !STOPWORDS.includes(token)).forEach((token) => {
+            if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
+                keys.push([...key,token])
+            }
         })
-    } else {
+    } else if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
         keys.push([...key,value])
     }
     return keys;
@@ -289,7 +313,8 @@ const serializeSpecial = ({keepUndefined,keepRegExp}={}) => (key,value) => {
 function *matchIndex(pattern,{cname,sortable}={}) {
     const yielded = new Set(),
         matches = new Map(),
-        keys = getKeys(serializeSpecial({keepRegExp:true})(null,pattern));
+        schema = this.getSchema(cname),
+        keys = getKeys(serializeSpecial({keepRegExp:true})(null,pattern),schema?.indexKeys);
     let i = 0;
     for(let key of keys) {
         const value = key.pop(),
@@ -451,17 +476,21 @@ const selector = (value,pattern,{root=value,parent,key}={}) => {
         if(pattern instanceof Date) {
             return value && type==="object" && pattern.getTime()===value.getTime() ? value : undefined;
         }
-        const selected = value.constructor===Array ? [] : Object.create(value.constructor.prototype);
-        for(const entry of Object.entries(pattern)) {
-            const key = entry[0];
-            // if isRegExp(key) then loop over keys on value
-            let result;
-            if((result = selector(value[key],entry[1],{root,parent:value,key}))===undefined) {
-                return;
+        for(const key in value) {
+            if(!(key in pattern)) {
+                delete value[key];
             }
-            selected[key] = result;
         }
-        return selected;
+        for(const entry of Object.entries(pattern)) {
+            const key = entry[0],
+                result = selector(value[key],entry[1],{root,parent:value,key});
+            if(result===undefined) {
+                delete value[key]
+            } else {
+                value[key] = result;
+            }
+        }
+        return value;
     }
     return pattern===value ? value : undefined;
 }
@@ -513,9 +542,38 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,sort,so
     }
 }
 
+const functionalOperators = Object.entries(operators).reduce((operators,[key,f]) => {
+    operators[key] = function(test) {
+        let join;
+        const op = (left,right) => {
+            return join ? f(left,right) : f(left,{test});
+        }
+        return op;
+    }
+    operators.$and = (...tests) => {
+        const op = (left,right) => {
+            return tests.every((test) => test(left,right));
+        }
+        return op;
+    }
+    operators.$or = (...tests) => {
+        const op = (left,right) => {
+            return tests.some((test) => test(left,right));
+        }
+        return op;
+    }
+    operators.$not = (test) => {
+        const op = (left,right) => {
+            return !test(left,right);
+        }
+        return op;
+    }
+    return operators;
+},{});
+
 const withExtensions = (db,extensions={}) => {
     db.indexDB = db.openDB(`${db.name}.index`,{noMemInit:true,dupSort:true,encoding:"ordered-binary"});
     return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,getSchema,index,indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
-export {DONE,ANY,withExtensions}
+export {DONE,ANY,functionalOperators as operators,withExtensions}
