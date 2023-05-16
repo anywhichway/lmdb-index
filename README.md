@@ -2,7 +2,7 @@
 
 - object indexing for LMDB,
 - index based queries using literals, functions, and regular expressions,
-- over 60 pre-built predicate functions for use in queries, e.g. `$lte`, `$eq`, `$gte`, `$echoes` (soundex), `$includes`,
+- over 60 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
 - automatic id generation,
 - instantiation of returned objects as instances of their original classes,
 - copy, move, and patch operations,
@@ -206,12 +206,15 @@ Automatically adds `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `p
 
 ## Operators
 
-The following operators are supported in `indexMatch` and `indexKeys`:
+The following operators are supported in `indexMatch`, `valueMatch` and `select`.
+
+### Logical
 
 * `$and(...)` - logical and
 * `$or(...)` - logical or
 * `$not(...)` - logical not
 
+### Comparison
 
 * `$lt(boolean|number|string)` - less than
 * `$lte(boolean|number|string)` - less than or equal to
@@ -220,11 +223,17 @@ The following operators are supported in `indexMatch` and `indexKeys`:
 * `$eq(boolean|number|string)` - equal to
 * `$eeq(boolean|number|string)` - equal to and same type, e.g. `1` is not equal to `'1'
 * `$neq(boolean|number|string)` - not equal to
+* `$between(boolean|number|string,boolean|number|string)` - property value is between the two values (inclusive)
+* `$outside(boolean|number|string,boolean|number|string)` - property value is not between the two values (exclusive)
 
+### String
 
 * `$startsWith(string)` - property value starts with string
 * `$endsWith(string)` - property value ends with string
+* `$matches(RegExp)` - property value matches regular expression
+* `$echoes(string)` - property value sounds like the `string`
 
+### Arrays and Sets
 
 * `$in(array)` - property value is in array
 * `$nin(array)` - property values is not in array
@@ -236,14 +245,7 @@ The following operators are supported in `indexMatch` and `indexKeys`:
 * `$superset(array)` - property value is an array and is a superset of array
 * `$symmetric(array)` - property value is an array and has same elements as array
 
-
-* `$between(boolean|number|string,boolean|number|string)` - property value is between the two values (inclusive)
-* `$outside(boolean|number|string,boolean|number|string)` - property value is not between the two values (exclusive)
-
-
-* `$matches(RegExp)` - property value matches regular expression
-* `$echoes(string)` - property value sounds like the `string`
-
+### Basic Types
 
 * `$type(typeName:string)` - property value is of `typeName` type
 * `$isOdd()` - property value is odd
@@ -255,20 +257,15 @@ The following operators are supported in `indexMatch` and `indexKeys`:
 * `$isInteger()` - property value is an integer
 * `$isFloat()` - property value is a float
 * `$isNaN()` - property value is not a number
-
-
-* `$isTruthy()` - property value is truthy
-* `$isFalsy()` - property value is falsy
-
-
-* `$isUndefined()` - property value is undefined
-* `$isNull()` - property value is null
-
-
 * `$isArray()` - property value is an array
 * `$isObject()` - property value is an object
 * `$isPrimitive()` - property value is a primitive
+* `$isUndefined()` - property value is undefined
+* `$isNull()` - property value is null
+* `$isTruthy()` - property value is truthy
+* `$isFalsy()` - property value is falsy
 
+### Extended Types
 
 * `$isCreditCard()` - property value is a credit card number
 * `$isEmail()` - property value is an email address
@@ -288,9 +285,9 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   88.05 |    82.99 |   94.48 |   91.91 |
-lmdb-index     |   85.28 |    75.75 |   88.13 |   90.16 |
-index.js      |   85.28 |    75.75 |   88.13 |   90.16 | ...5,359,367,377-386,392-402,426,451,470-474,495,517,566-569
+All files       |   91.73 |    85.73 |   94.53 |   96.08 |
+lmdb-index     |   89.82 |    79.84 |   88.33 |   95.23 |
+index.js      |   89.82 |    79.84 |   88.33 |   95.23 | 98,106,109,392,402-403,432,457,476-480,501,523,572-575
 lmdb-index/src |     100 |    97.91 |     100 |     100 |
 operators.js  |     100 |    97.91 |     100 |     100 | 10,186,190-191
 
@@ -302,6 +299,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-05-16 v0.8.1 Added unit tests. Addressed issue with nested object indexing and matching keys with RegExp.
 
 2023-05-15 v0.8.0 Updated documentation. Corrected issue with `indexKeys` on schema not being processed, select processing not handling `root` assignment and removal of unselected properties. Supplied a range of pre-built operator functions for index and value matching.
 

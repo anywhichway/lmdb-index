@@ -130,6 +130,15 @@ test("getRangeFromIndex - with RegExp Key",() => {
     expect(range[0].value).toEqual(person);
 })
 
+test("getRangeFromIndex - with RegExp Key nested",() => {
+    const range = [...db.getRangeFromIndex({[/address/]: {city:"New York"}},null,null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.address.city).toBe("New York");
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
+
 test("getRangeFromIndex - with value match",() => {
     const range = [...db.getRangeFromIndex({name:"joe"}, {created:now},null,{cname:"Person"})];
     expect(range.length).toBe(1);

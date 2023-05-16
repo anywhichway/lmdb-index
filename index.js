@@ -43,7 +43,7 @@ function defineSchema(ctor,options={}) {
     const schema = this.schema[ctor.name] ||= {};
     Object.assign(schema,options);
     if(schema.indexKeys) {
-        schema.indexKeys = schema.indexKeys.map((key)=>key.split(".").map((part)=>part+=":").join("."));
+        schema.indexKeys = schema.indexKeys.map((key)=>key.split(".").map((part)=>part+=":").join(""));
     }
     return schema;
 }
@@ -233,16 +233,18 @@ function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
             for(const entry of Object.entries(value)) {
                 const regExp = toRegExp(entry[0]),
                     next = regExp ? regExp: `${entry[0]}:`;
-                getKeys( [...key,next],entry[1],schemaKeys,keys,!!regExp);
+                if(regExp || hasRegExp || !schemaKeys || schemaKeys.some((schemaKey) => schemaKey.startsWith([...key,next].join("")))) {
+                    getKeys( [...key,next],entry[1],schemaKeys,keys,!!regExp);
+                }
             }
         }
     } else if(type==="string") {
         tokenize(value).filter((token) => !STOPWORDS.includes(token)).forEach((token) => {
-            if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
+            //if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
                 keys.push([...key,token])
-            }
+            //}
         })
-    } else if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
+    } else { //if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
         keys.push([...key,value])
     }
     return keys;
@@ -327,7 +329,7 @@ function *matchIndex(pattern,{cname,sortable}={}) {
             });
         let arg,
             method;
-        if (start.length+1===key.length && ["boolean", "number", "string", "symbol"].includes(type) || value === null) {
+        if (start.length===key.length && !start.includes(null) && ["boolean", "number", "string", "symbol"].includes(type) || value === null) {
             arg = [...start, value];
             method = "getValues";
         } else {
@@ -347,9 +349,8 @@ function *matchIndex(pattern,{cname,sortable}={}) {
                 if(key.some((part,i) => {
                     if(part && typeof(part)==="object") {
                         const key = item.key[i];
-                        if(part instanceof RegExp && !part.test(key.substring(0,key.length-1))) {
-                            wasRegExp = true;
-                            return true;
+                        if(part instanceof RegExp) {
+                            return part.test(key.substring(0,key.length-1)) ? false : wasRegExp = true;
                         }
                     } else if(part!==item.key[i]) {
                         return true;
@@ -362,6 +363,11 @@ function *matchIndex(pattern,{cname,sortable}={}) {
                 if (type === "function") {
                     true===true; // functions always match indexes, resolved at value test, effectively a table scan
                 } else if (value && type === "object") {
+                    if(value instanceof RegExp) {
+                        if(!value.test(toTest)) {
+                            continue;
+                        }
+                    }
                     true===true; // objects always match indexes, resolved at value test, effectively a table scan
                 } else if (toTest !== value) {
                     continue;
