@@ -48,6 +48,22 @@ function defineSchema(ctor,options={}) {
     return schema;
 }
 
+// todo clearAsync and clearSync should remove indexes
+
+async function clearAsync(clearAsync) {
+    return this.transaction(async ()=>{
+        await clearAsync.call(this)
+        if(this.indexDb) await this.indexDB.clearAsync()
+    });
+}
+
+function clearSync(clearSync) {
+    return this.transactionSync(()=>{
+        clearSync.call(this)
+        if(this.indexDB) this.indexDB.clearSync();
+    });
+}
+
 async function copy(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true});
     if (!entry || (ifVersion != null && entry.version !== ifVersion)) return false;
@@ -207,14 +223,15 @@ async function index(value,cname,...args) {
 
 function indexSync(value,cname,...args) {
     const schema = this.getSchema(cname||value);
-    if(!schema) return;
-    cname ||= schema.ctor.name;
-    const id = value[schema.idKey] ||= `${cname}@${uuid()}`;
+    cname ||= schema ? schema.ctor.name : value.constructor.name;
+    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
     return this.transactionSync(  () => {
         value = serializeSpecial()(null,value);
         if(this.putSync(id,value,cname,...args)) {
-            for(const key of getKeys(value,schema.indexKeys)) {
-                this.indexDB.putSync(key,id);
+            if(schema) {
+                for(const key of getKeys(value,schema.indexKeys)) {
+                    this.indexDB.putSync(key,id);
+                }
             }
             return id;
         }
@@ -371,14 +388,14 @@ function *matchIndex(pattern,{cname,sortable}={}) {
                 }
                 let toTest = item.key[item.key.length - 1];
                 if (type === "function") {
-                    true===true; // functions always match indexes, resolved at value test, effectively a table scan
+                    if([undefined,DONE].includes(value(toTest))) break;
                 } else if (value && type === "object") {
                     if(value instanceof RegExp) {
                         if(!value.test(toTest)) {
                             continue;
                         }
                     }
-                    true===true; // objects always match indexes, resolved at value test, effectively a table scan
+                    // objects always match indexes, resolved at value test, effectively a table scan
                 } else if (toTest !== value) {
                     continue;
                 }
@@ -607,7 +624,7 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
 
 const withExtensions = (db,extensions={}) => {
     db.indexDB = db.openDB(`${db.name}.index`,{noMemInit:true,dupSort:true,encoding:"ordered-binary"});
-    return lmdbExtend(db,{copy,defineSchema,get,getRangeFromIndex,getSchema,index,indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
+    return lmdbExtend(db,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index,indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
 export {DONE,ANY,functionalOperators as operators,withExtensions}

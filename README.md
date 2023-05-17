@@ -285,9 +285,9 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   95.12 |    88.87 |     100 |   98.66 |
-lmdb-index     |   94.03 |    84.14 |     100 |   98.39 |
-index.js      |   94.03 |    84.14 |     100 |   98.39 | 99,402,412-413,467,490
+All files       |   94.23 |    88.56 |    98.5 |   98.02 |
+lmdb-index     |   92.95 |     83.8 |   96.96 |   97.61 |
+index.js      |   92.95 |     83.8 |   96.96 |   97.61 | 54-56,115,419,429-430,484,507
 lmdb-index/src |     100 |    98.95 |     100 |     100 |
 operators.js  |     100 |    98.95 |     100 |     100 | 13,189
 
@@ -299,9 +299,11 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-06-16 v0.9.1 Removed un-neccary giles from npm package.
+2023-06-18 v0.10.0 `db.clearAsync` and `db.clearSync` now clear indexes. Corrected issue with `db.indexSync` when indexing POJOs. Corrected v0.9.1 and v0.9.0 dates below.
 
-2023-06-16 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
+2023-06-17 v0.9.1 Removed un-necessary files from npm package.
+
+2023-06-17 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
 
 2023-05-16 v0.8.1 Added unit tests. Addressed issue with nested object indexing and matching keys with RegExp.
 

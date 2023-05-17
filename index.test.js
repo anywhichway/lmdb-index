@@ -13,7 +13,6 @@ class Person {
 
 db.indexDB = db.openDB("index",{noMemInit:true,dupSort:true,encoding:"ordered-binary"}); //,
 db.clearSync();
-db.indexDB.clearSync();
 const now = new Date(),
     personSchema = db.defineSchema(Person,{indexKeys:["name","address.city","address.state","created","aRegExp"]}),
     person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/},
@@ -46,7 +45,7 @@ test("getSchema fail - from instance",() => {
 
 test("put un-indexed",async () => {
     const id = await db.putSync(null, {});
-    expect(id).toBeUndefined();
+    expect(id).toBeDefined();
 })
 
 test("get",() => {

@@ -7,6 +7,7 @@ const benchmark = await import("./node_modules/benchmark/benchmark.js"),
 const db = withExtensions(open("test.db",{noMemInit:true}))
 db.clearSync();
 db.indexDB.clearSync();
+db.defineSchema(Object);
 await db.put("async",1);
 await db.put("sync",1);
 await db.index({name:"joe",age:21,address:{city:"New York",state:"NY"},"#":"TestObjectFixed"});
@@ -42,15 +43,15 @@ let count = 0,
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("index async",async () => {
+(new Benchmark.Suite).add("index sync",() => {
     if(count>maxCount) return;
-    await db.index({name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
+    db.indexSync({name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("index Sync",() => {
+(new Benchmark.Suite).add("index async",async () => {
     if(count<0) { count++;  return; }
-    db.indexSync({name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
+    await db.index({name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});

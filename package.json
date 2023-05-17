@@ -1,6 +1,6 @@
 {
   "name": "lmdb-index",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Object indexing and index based queries for LMDB",
   "type": "module",
   "main": "index.js",
