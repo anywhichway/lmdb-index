@@ -138,6 +138,8 @@ test("$matches",() => {
 test("$echoes",() => {
     expect(operators.$echoes("lyme", {test: "lime"})).toBe("lyme");
     expect(operators.$echoes("lemon", {test: "apple"})).toBeUndefined();
+    expect(operators.$echoes("one hundred", {test: 100})).toBe("one hundred");
+    expect(operators.$echoes(100, {test: "one hundred"})).toBe(100);
 })
 
 test("$isOdd",() => {

@@ -1,6 +1,6 @@
 {
   "name": "lmdb-index",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Object indexing and index based queries for LMDB",
   "type": "module",
   "main": "index.js",
@@ -35,6 +35,7 @@
     "lmdb-move": "^0.1.2",
     "lmdb-patch": "^1.0.4",
     "lmdb-query": "^1.5.4",
+    "to-words": "^3.5.1",
     "uuid": "^9.0.0"
   }
 }

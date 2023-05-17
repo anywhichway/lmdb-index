@@ -1,7 +1,7 @@
 import {open} from "lmdb";
 import {withExtensions,operators} from "./index.js";
 
-const {$gt,$gte,$eq,$neq,$and,$or} = operators;
+const {$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
 
 const db = withExtensions(open("test.db",{noMemInit:true}));
 
@@ -82,6 +82,15 @@ test("getRangeFromIndex with operator",() => {
     expect(range[0].value).toEqual(person);
 })
 
+test("getRangeFromIndex with $not operator",() => {
+    const range = [...db.getRangeFromIndex({name:$not($eq("bill"))},null,null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name!=="bill").toBeTruthy()
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
+
 test("getRangeFromIndex with select",() => {
     const range = [...db.getRangeFromIndex({name:/joe/,age:21},null, {
         name(value,{root}) {
@@ -96,6 +105,34 @@ test("getRangeFromIndex with select",() => {
     expect(range[0].value.age).toBe(21);
     expect(range[0].value.created.getTime()).toBe(now.getTime());
     expect(Object.keys(range[0].value).length).toBe(3);
+})
+
+test("getRangeFromIndex with select with RegExp",() => {
+    const range = [...db.getRangeFromIndex({name:/joe/,age:21},null, {
+        name:/(joe)/,
+        [/age/]:(value)=>value,
+        created:now
+    },{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name).toBe("joe");
+    expect(range[0].value.age).toBe(21);
+    expect(range[0].value.created.getTime()).toBe(now.getTime());
+    expect(Object.keys(range[0].value).length).toBe(3);
+})
+
+test("getRangeFromIndex with select with RegExp - delete RegExp property",() => {
+    const range = [...db.getRangeFromIndex({name:/joe/,age:21},null, {
+        name:/(joe)/,
+        [/age/]:()=>undefined,
+        created:now
+    },{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name).toBe("joe");
+    expect(range[0].value.age).toBeUndefined();
+    expect(range[0].value.created.getTime()).toBe(now.getTime());
+    expect(Object.keys(range[0].value).length).toBe(2);
 })
 
 test("getRangeFromIndex - with function",() => {
@@ -139,6 +176,11 @@ test("getRangeFromIndex - with RegExp Key nested",() => {
     expect(range[0].value).toEqual(person);
 })
 
+test("getRangeFromIndex - with RegExp Key nested fail",() => {
+    const range = [...db.getRangeFromIndex({address: {city:"New York"}},{[/address/]: {city:()=>undefined}},null,{cname:"Person"})];
+    expect(range.length).toBe(0);
+})
+
 test("getRangeFromIndex - with value match",() => {
     const range = [...db.getRangeFromIndex({name:"joe"}, {created:now},null,{cname:"Person"})];
     expect(range.length).toBe(1);
@@ -159,11 +201,11 @@ test("getRangeFromIndex - fail",() => {
 })
 
 test("getRangeFromIndex - sortable",() => {
-    const range = [...db.getRangeFromIndex({name:"joe",pronoun:"he"},null,null,{cname:"Person",sortable:true})];
+    const range = [...db.getRangeFromIndex({name:"joe",pronoun:"he"},null, {name:"joe"},{cname:"Person",sortable:true})];
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
-    delete range[0].value["#"];
-    expect(range[0].value).toEqual(person);
+    expect(range[0].value.name).toBe("joe");
+    expect(Object.keys(range[0].value).length).toBe(1);
 })
 
 test("put",async () => {
@@ -240,7 +282,7 @@ test("copy primitive",async () => {
 })
 
 test("patch",async () => {
-    const result = await db.patch(personId,{age:22});
+    const result = await db.patch(personId,{age:22,created:new Date()});
     expect(result).toBe(true);
     const value = db.get(personId);
     expect(value).toBeInstanceOf(Person);

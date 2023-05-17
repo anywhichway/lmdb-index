@@ -1,31 +1,24 @@
-/*
 import {open} from "lmdb";
+import {withExtensions,operators} from "./index.js";
+
 const benchmark = await import("./node_modules/benchmark/benchmark.js"),
     Benchmark = benchmark.default;
 
-let db = Object.assign(open("test.db",{noMemInit:true}),{
-    index,
-    indexSync,
-    matchIndex,
-    getRangeFromIndex
-})
-db.indexDB = db.openDB("index",{noMemInit:true,dupSort:true,encoding:"ordered-binary"}); //,
+const db = withExtensions(open("test.db",{noMemInit:true}))
 db.clearSync();
 db.indexDB.clearSync();
 await db.put("async",1);
 await db.put("sync",1);
 await db.index({name:"joe",age:21,address:{city:"New York",state:"NY"},"#":"TestObjectFixed"});
-for(const entry of db.getRangeFromIndex({address:{city:"New York"}})) {
-   console.log(entry);
-}
-*/
-
-//const log = (event,count) => {
-//const str = String(event.target),
-//     ops = parseFloat(str.match(/.*x\s([\d.,]*)\sops.*/)[1].replaceAll(",",""));
-//console.log(str,"records:",count===0 ? 0 + (" Error?") : new Intl.NumberFormat().format(count),"records/sec:",count===0 ? 0 + (" Error?") : new Intl.NumberFormat().format(count/event.target.stats.mean));
+//for(const entry of db.getRangeFromIndex({address:{city:"New York"}})) {
+  // console.log(entry);
 //}
-/*
+
+const log = (event,count) => {
+    const str = String(event.target),
+     ops = parseFloat(str.match(/.*x\s([\d.,]*)\sops.*/)[1].replaceAll(",",""));
+    console.log(str,"records:",count===0 ? 0 + (" Error?") : new Intl.NumberFormat().format(count),"records/sec:",count===0 ? 0 + (" Error?") : new Intl.NumberFormat().format(count/event.target.stats.mean));
+}
 const maxCount = Infinity;
 let count = 0,
     found = false;
@@ -49,15 +42,15 @@ let count = 0,
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("index",async () => {
+(new Benchmark.Suite).add("index async",async () => {
     if(count>maxCount) return;
     await db.index({name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("index",() => {
-    if(count>maxCount) return;
-    db.indexSync({name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count++}`});
+(new Benchmark.Suite).add("index Sync",() => {
+    if(count<0) { count++;  return; }
+    db.indexSync({name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
@@ -188,4 +181,3 @@ setTimeout(() => {
         })
         .run({} );
 },10000)
-*/

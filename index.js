@@ -94,12 +94,13 @@ async function patch(key,patch,version,ifVersion) {
         schema = isObject ? getSchema.call(this, cname) : null;
     if(schema) {
         return this.childTransaction(async () => {
+            patch = serializeSpecial()(patch);
             if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
                 throw new Error(`Unable to patch ${key}`);
             }
             const id = key,
                 patchKeys = getKeys(patch,schema.indexKeys),
-                entryKeys = getKeys(entry.value,schema.indexKeys),
+                entryKeys = getKeys(serializeSpecial()(entry.value),schema.indexKeys),
                 keysToRemove = entryKeys.filter((ekey)=> patchKeys.some((pkey) => pkey.length==ekey.length && pkey.every((item,i)=> i==pkey.length-1 || item===ekey[i]))),
                 keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
             for(const key of keysToRemove) {
@@ -239,11 +240,15 @@ function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
             }
         }
     } else if(type==="string") {
-        tokenize(value).filter((token) => !STOPWORDS.includes(token)).forEach((token) => {
-            //if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
-                keys.push([...key,token])
-            //}
-        })
+        if(isSpecial(value)) {
+            keys.push([...key,value])
+        } else {
+            tokenize(value).filter((token) => !STOPWORDS.includes(token)).forEach((token) => {
+                //if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
+                    keys.push([...key,token])
+                //}
+            })
+        }
     } else { //if(!schemaKeys || hasRegExp || schemaKeys.includes(key.join("."))) {
         keys.push([...key,value])
     }
@@ -290,6 +295,11 @@ const deserializeSpecial = (key,value) => {
         });
     }
     return value;
+}
+
+const isSpecial = (value) => {
+    const specials = ["@undefined","@Infinity","@-Infinity","@NaN"];
+    return specials.includes(value) || value.match(/@.*\(.*\)/)
 }
 
 const serializeSpecial = ({keepUndefined,keepRegExp}={}) => (key,value) => {
@@ -423,8 +433,8 @@ function matchValue(pattern,value,serialized) {
             return value && type==="object" && pattern.getTime()===value.getTime() ? value : undefined;
         }
         for(const entry of Object.entries(pattern)) {
-            const key = entry[0];
-            const regExp = toRegExp(key);
+            const key = entry[0],
+                regExp = toRegExp(key);
             if(regExp) {
                 for(const [key,v] of Object.entries(value)) {
                     if(regExp.test(key)) {
@@ -483,17 +493,35 @@ const selector = (value,pattern,{root=value,parent,key}={}) => {
             return value && type==="object" && pattern.getTime()===value.getTime() ? value : undefined;
         }
         for(const key in value) {
-            if(!(key in pattern)) {
+            if(!Object.keys(pattern).some((pkey)=> {
+                const regExp = toRegExp(pkey);
+                return (regExp && regExp.test(key)) || pkey===key;
+            })) {
                 delete value[key];
             }
         }
         for(const entry of Object.entries(pattern)) {
             const key = entry[0],
-                result = selector(value[key],entry[1],{root,parent:value,key});
-            if(result===undefined) {
-                delete value[key]
+                regExp = toRegExp(key);
+            let result;
+            if(regExp) {
+                for(const [key,v] of Object.entries(value)) {
+                    if(regExp.test(key)) {
+                        result = selector(v,entry[1], {root, parent: value, key})
+                        if (result === undefined) {
+                            delete value[key]
+                        } else {
+                            value[key] = result;
+                        }
+                    }
+                }
             } else {
-                value[key] = result;
+                result = selector(value[key],entry[1], {root, parent: value, key});
+                if (result === undefined) {
+                    delete value[key]
+                } else {
+                    value[key] = result;
+                }
             }
         }
         return value;

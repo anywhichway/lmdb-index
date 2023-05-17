@@ -2,7 +2,7 @@
 
 - object indexing for LMDB,
 - index based queries using literals, functions, and regular expressions,
-- over 60 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
+- over 50 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
 - automatic id generation,
 - instantiation of returned objects as instances of their original classes,
 - copy, move, and patch operations,
@@ -15,7 +15,7 @@ This is BETA software. The API is stable and unit test coverage exceeds 90%.
 # Installation
 
 ```bash
-npm install lmdb-index
+npm install lmdb-index --save
 ```
 
 # Usage
@@ -52,7 +52,7 @@ if(id) {
         console.log(person)
     });
     [...db.getRangeFromIndex({
-        name:(value) => value!=null ? value : undefined,
+        [/name/]:"bill",
         address:{city:"New York"}
     })].forEach((person) => {
         console.log(person)
@@ -62,7 +62,7 @@ if(id) {
 
 ## API
 
-### async db.copy(key:LMDBKey,?destKey:LMDBKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey
+#### async db.copy(key:LMDBKey,?destKey:LMDBKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey
 
 Works similar to [lmdb-copy](https://github.com/anywhichway/lmdb-copy) but provides automatic key assignment and indexing.
 
@@ -76,7 +76,7 @@ If `key` points to a primitive:
 - The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
 - The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
 
-### async db.defineSchema(classConstructor:function|class,?options={}) - returns boolean
+#### async db.defineSchema(classConstructor:function|class,?options={}) - returns boolean
 
 - The key names in the array `options.indexKeys` will be indexed. Nested keys use dot notation. If no value is provided, all keys will be indexed. If `options.indexKeys` is an empty array, no keys will be indexed. 
 - If the property `options.idKey` is provided, its value will be used for unique ids. If `options.idKey` is not provided, the property `#` on instances will be used for unique ids.
@@ -88,13 +88,13 @@ To index all keys on all objects using UUIDs as ids and `#` as the id key, call 
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
-### db.getSchema(value:string|object,create:boolean) - returns object representing schema
+#### db.getSchema(value:string|object,create:boolean) - returns object representing schema
 
 Returns the schema for the class of the object or `undefined`.
 
 If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
 
-### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
 Yields objects of the form `{key,value,count,version}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches, `version` is the version number and is only present if the database was opened using versioning.
 
@@ -117,7 +117,7 @@ The standard form for functions used in queries is `(value) => ... some code tha
 
 `select` is a function or object that is used to select which properties of the object are returned. If `select` is an object, then the properties of the `select` are used as keys to select properties from the match. The properties may be serialized RegExp. The values of these properties can be literals, RegExp, or functions. 
 
-Functions returning `undefined` or RegExp and literals that do not match drop properties. Functions are called with the object as the first argument and `{root,parent,key}` as the second. For example:
+Functions returning `undefined` or RegExp and literals that do not match drop properties. Make sure RegExp that are used for values contain a selection group. Functions are called with the object as the first argument and `{root,parent,key}` as the second. For example:
 
 ```javascript
 {
@@ -160,25 +160,25 @@ db.put(null,{name:"joe",address:{city:"York",state:"PA"}});
 If `sort` is `true` entries are returned based on how many index matches occurred, with the highest first. If `sort` is a function, then entries are returned in the order determined by the function. Note, both of these are expensive since they require resolving all matches first.
 
 
-### async db.index(object:object,?cname:string,?version:number,?ifVersion:number) - returns LMDBKey|undefined
+#### async db.index(object:object,?cname:string,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Puts the object in the database and indexes it inside a transaction. Returns the object's id if successful, otherwise `undefined`.
 
 Called by `db.put(null,value)`
 
-### async db.move(key:lmdbKey,destKey:lmdbKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey|undefined
+#### async db.move(key:lmdbKey,destKey:lmdbKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Works similar to [lmdb-move](https://github.com/anywhichway/lmdb-move) but provides automatic key assignment and indexing.
 
 Works the same as `copy` above, except the entry at the original `key` is removed inside the transaction.
 
-### async db.patch(key:string,patch:object,?version,?ifVersion) - returns boolean
+#### async db.patch(key:string,patch:object,?version,?ifVersion) - returns boolean
 
 Inside a single transaction, updates the index after the patch.
 
 Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
-### async db.put(key:LMDBKey,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+#### async db.put(key:LMDBKey,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
@@ -194,11 +194,11 @@ The `key` or in the case of objects the object id is returned if the transaction
 
 See `db.index` to avoid the need for a `null` first argument and more information.
 
-### async db.remove(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
+#### async db.remove(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
-### withExtensions(db:LMDBDatabase,?extensions:object) - returns LMDBDatabase`
+#### withExtensions(db:LMDBDatabase,?extensions:object) - returns LMDBDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
@@ -208,13 +208,13 @@ Automatically adds `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `p
 
 The following operators are supported in `indexMatch`, `valueMatch` and `select`.
 
-### Logical
+#### Logical
 
-* `$and(...)` - logical and
-* `$or(...)` - logical or
-* `$not(...)` - logical not
+* `$and(...operatorResult)` - logical and
+* `$or(...operatorResult))` - logical or
+* `$not(...operatorResult))` - logical not
 
-### Comparison
+#### Comparison
 
 * `$lt(boolean|number|string)` - less than
 * `$lte(boolean|number|string)` - less than or equal to
@@ -226,14 +226,14 @@ The following operators are supported in `indexMatch`, `valueMatch` and `select`
 * `$between(boolean|number|string,boolean|number|string)` - property value is between the two values (inclusive)
 * `$outside(boolean|number|string,boolean|number|string)` - property value is not between the two values (exclusive)
 
-### String
+#### String
 
 * `$startsWith(string)` - property value starts with string
 * `$endsWith(string)` - property value ends with string
 * `$matches(RegExp)` - property value matches regular expression
 * `$echoes(string)` - property value sounds like the `string`
 
-### Arrays and Sets
+#### Arrays and Sets
 
 * `$in(array)` - property value is in array
 * `$nin(array)` - property values is not in array
@@ -245,7 +245,7 @@ The following operators are supported in `indexMatch`, `valueMatch` and `select`
 * `$superset(array)` - property value is an array and is a superset of array
 * `$symmetric(array)` - property value is an array and has same elements as array
 
-### Basic Types
+#### Basic Types
 
 * `$type(typeName:string)` - property value is of `typeName` type
 * `$isOdd()` - property value is odd
@@ -265,7 +265,7 @@ The following operators are supported in `indexMatch`, `valueMatch` and `select`
 * `$isTruthy()` - property value is truthy
 * `$isFalsy()` - property value is falsy
 
-### Extended Types
+#### Extended Types
 
 * `$isCreditCard()` - property value is a credit card number
 * `$isEmail()` - property value is an email address
@@ -285,12 +285,11 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   91.73 |    85.73 |   94.53 |   96.08 |
-lmdb-index     |   89.82 |    79.84 |   88.33 |   95.23 |
-index.js      |   89.82 |    79.84 |   88.33 |   95.23 | 98,106,109,392,402-403,432,457,476-480,501,523,572-575
-lmdb-index/src |     100 |    97.91 |     100 |     100 |
-operators.js  |     100 |    97.91 |     100 |     100 | 10,186,190-191
-
+All files       |   95.12 |    88.87 |     100 |   98.66 |
+lmdb-index     |   94.03 |    84.14 |     100 |   98.39 |
+index.js      |   94.03 |    84.14 |     100 |   98.39 | 99,402,412-413,467,490
+lmdb-index/src |     100 |    98.95 |     100 |     100 |
+operators.js  |     100 |    98.95 |     100 |     100 | 13,189
 
 # Release Notes (Reverse Chronological Order)
 
@@ -299,6 +298,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-06-16 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
 
 2023-05-16 v0.8.1 Added unit tests. Addressed issue with nested object indexing and matching keys with RegExp.
 
@@ -314,7 +315,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 
 2023-05-06 v0.6.6 Removed test db from Git.
 
-2023-05-05 v0.6.5 Fixed issue wih not removing un-indexed primitives.
+2023-05-05 v0.6.5 Fixed issue with not removing un-indexed primitives.
 
 2023-05-05 v0.6.4 Updated `lmdb-query` to 1.5.4. Fixed issue with `put` not awaiting.
 
@@ -332,7 +333,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 
 2023-04-28 v0.4.3 Adjusted to use `withextensions` from `lmdb-query`. Enhanced documentation.
 
-2023-04-27 v0.4.2 Added support for patch. Simplified `withExtensions` us. Enhanced documentation.
+2023-04-27 v0.4.2 Added support for patch. Simplified `withExtensions` use. Enhanced documentation.
 
 2023-04-24 v0.4.1 Adjustments to `copy` and `move` to ensure correct id assignment. Documentation formatting and typo corrections.
 
