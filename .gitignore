@@ -105,3 +105,8 @@ dist
 
 # lmdb
 *.mdb
+*.db
+*.db-lock
+
+# webstorm
+.idea/
