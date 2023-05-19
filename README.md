@@ -296,7 +296,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-06-19 v0.10.0 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
+2023-06-19 v0.10.1 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
 
 2023-06-17 v0.9.1 Removed un-necessary files from npm package.
 
