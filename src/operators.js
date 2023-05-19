@@ -1,3 +1,4 @@
+import {DONE} from "lmdb-query";
 import {ToWords} from "to-words";
 const toWords = new ToWords();
 
@@ -118,10 +119,10 @@ const operators = {
     },
 
     $lt(right, {test}) {
-        return right<test ? right : undefined
+        return right<test ? right : DONE
     },
     $lte(right, {test}) {
-        return right<=test ? right : undefined
+        return right<=test ? right : DONE
     },
     $eq(right, {test}) {
         return right==test ? right : undefined
@@ -140,7 +141,7 @@ const operators = {
     },
 
     $between(right, {test}) {
-        return right>=test[0] && right<=test[1] ? right : undefined
+        return right>=test[0] && right<=test[1] ? right : right>test[1] ? DONE : undefined
     },
     $outside(right, {test}) {
         return right<test[0] || right>test[1] ? right : undefined
@@ -276,4 +277,4 @@ const operators = {
 */
 }
 
-export {operators as default,operators}
+export {operators as default,operators,DONE}

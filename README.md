@@ -31,7 +31,7 @@ class Person {
         Object.assign(this,config);
     }
 }
-const db = withExtensions(open("test"));
+const db = withExtensions(open("test",{indexOptions:{fulltext:true}}));
 db.defineSchema(Object);
 db.defineSchema(Person);
 const id = await db.put(null,new Person({name:"bill",age:21,address:{city:"New York",state:"NY"}}));
@@ -53,13 +53,12 @@ if(id) {
     });
     [...db.getRangeFromIndex({
         [/name/]:"bill",
-        address:{city:"New York"}
-    })].forEach((person) => {
+        address:{city:"York"} // fulltext indexing turned on, partial matches returned so long as `valueMatch` is relaxed
+    },(value)=>value)].forEach((person) => {
         console.log(person)
     });
 }
 ```
-
 ## API
 
 #### async db.copy(key:LMDBKey,?destKey:LMDBKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey
@@ -143,13 +142,15 @@ await db.put(null,new Pet({name:"bill",age:2}));
 });
 ```
 
-`sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches. 
+`sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches.
 
 `sortable` and `fulltext` return entries in the order they are indexed.
 
-`fulltext` (short for full text index), returns entries that have partial matches for string property values, e.g.
+`fulltext` (short for full text index), returns entries that have partial matches for string property values. To fully utilize `fulltext`, ensure the database is opened and entries have been indexed with `{indexOptions:{fulltext:true}}`.
+For example:
 
 ```javascript
+const db = open("test",{indexOptions:{fulltext:true}});
 db.put(null,{name:"bill",address:{city:"New York",state:"NY"}});
 db.put(null,{name:"joe",address:{city:"York",state:"PA"}});
 [...db.getRangeFromIndex({address:{city:"York"}},null,null,{fulltext:true})].forEach((person) => {
@@ -157,14 +158,10 @@ db.put(null,{name:"joe",address:{city:"York",state:"PA"}});
 });
 ```
 
+Note: When `{indexOptions:{fulltext:true}}` is set, passing functions as property values in `indexMatch` causes an index scan that may be expensive.
+
 If `sort` is `true` entries are returned based on how many index matches occurred, with the highest first. If `sort` is a function, then entries are returned in the order determined by the function. Note, both of these are expensive since they require resolving all matches first.
 
-
-#### async db.index(object:object,?cname:string,?version:number,?ifVersion:number) - returns LMDBKey|undefined
-
-Puts the object in the database and indexes it inside a transaction. Returns the object's id if successful, otherwise `undefined`.
-
-Called by `db.put(null,value)`
 
 #### async db.move(key:lmdbKey,destKey:lmdbKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
@@ -285,9 +282,9 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   94.23 |    88.56 |    98.5 |   98.02 |
-lmdb-index     |   92.95 |     83.8 |   96.96 |   97.61 |
-index.js      |   92.95 |     83.8 |   96.96 |   97.61 | 54-56,115,419,429-430,484,507
+All files       |   93.62 |    87.47 |   98.48 |    97.8 |
+lmdb-index     |   92.21 |    82.26 |   96.87 |   97.35 |
+index.js      |   92.21 |    82.26 |   96.87 |   97.35 | 54-56,115,270,423,433-434,488,511
 lmdb-index/src |     100 |    98.95 |     100 |     100 |
 operators.js  |     100 |    98.95 |     100 |     100 | 13,189
 
@@ -299,7 +296,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-06-18 v0.10.0 `db.clearAsync` and `db.clearSync` now clear indexes. Corrected issue with `db.indexSync` when indexing POJOs. Corrected v0.9.1 and v0.9.0 dates below.
+2023-06-19 v0.10.0 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
 
 2023-06-17 v0.9.1 Removed un-necessary files from npm package.
 

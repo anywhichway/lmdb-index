@@ -1,9 +1,9 @@
 import {open} from "lmdb";
 import {withExtensions,operators} from "./index.js";
 
-const {$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
+const {$lt,$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
 
-const db = withExtensions(open("test.db",{noMemInit:true}));
+const db = withExtensions(open("test.db",{noMemInit:true,indexOptions:{fulltext:true}}));
 
 class Person {
     constructor(config) {
@@ -11,15 +11,15 @@ class Person {
     }
 }
 
-db.indexDB = db.openDB("index",{noMemInit:true,dupSort:true,encoding:"ordered-binary"}); //,
 db.clearSync();
 const now = new Date(),
-    personSchema = db.defineSchema(Person,{indexKeys:["name","address.city","address.state","created","aRegExp"]}),
+    personSchema = db.defineSchema(Person,{indexKeys:["name","age","address.city","address.state","created","aRegExp"]}),
     person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/},
-    personId = await db.indexSync({...person},"Person");
+    personId =  db.putSync(null,{...person},"Person");
+
 
 test("redefine Schema",() => {
-    const schema = db.defineSchema(personSchema.ctor,{indexKeys:["name","address.city","address.state","created","aRegExp"]});
+    const schema = db.defineSchema(personSchema.ctor,{indexKeys:["name","age","address.city","address.state","created","aRegExp"]});
     expect(schema).toBe(personSchema)
 })
 
@@ -43,8 +43,8 @@ test("getSchema fail - from instance",() => {
     expect(schema).toBeUndefined()
 })
 
-test("put un-indexed",async () => {
-    const id = await db.putSync(null, {});
+test("put un-indexed",() => {
+    const id = db.putSync(null, {});
     expect(id).toBeDefined();
 })
 
@@ -79,6 +79,16 @@ test("getRangeFromIndex with operator",() => {
     expect(range[0].value).toBeInstanceOf(Person);
     delete range[0].value["#"];
     expect(range[0].value).toEqual(person);
+})
+
+test("getRangeFromIndex with uper bound operator",() => {
+    const id = db.putSync(null,new Person({age:24}));
+    const range = [...db.getRangeFromIndex({age:$lt(24)},null,null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+    db.removeSync(id);
 })
 
 test("getRangeFromIndex with $not operator",() => {
@@ -205,6 +215,27 @@ test("getRangeFromIndex - sortable",() => {
     expect(range[0].value).toBeInstanceOf(Person);
     expect(range[0].value.name).toBe("joe");
     expect(Object.keys(range[0].value).length).toBe(1);
+})
+
+test("getRangeFromIndex - fulltext",() => {
+    const ids = [db.putSync(null,new Person({name:"john jones"})),
+            db.putSync(null,new Person({name:"john johnston"})),
+            db.putSync(null,new Person({name:"john johnson"}))];
+    const range = [...db.getRangeFromIndex({name:"john johnson"},null, null,{cname:"Person",fulltext:true})];
+    expect(range.length).toBe(3);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range.every((item) => item.value.name.startsWith("john"))).toBe(true);
+    ids.forEach((id) => db.removeSync(id))
+})
+
+test("getRangeFromIndex - fulltext percentage",() => {
+    db.putSync(null,new Person({name:"john jones"}));
+    db.putSync(null,new Person({name:"john johnston"}));
+    db.putSync(null,new Person({name:"john johnson"}));
+    const range = [...db.getRangeFromIndex({name:"john johnson"},null, null,{cname:"Person"})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range[0].value.name.startsWith("john")).toBe(true);
 })
 
 test("put",async () => {

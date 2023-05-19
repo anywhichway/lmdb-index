@@ -4,9 +4,8 @@ import {withExtensions,operators} from "./index.js";
 const benchmark = await import("./node_modules/benchmark/benchmark.js"),
     Benchmark = benchmark.default;
 
-const db = withExtensions(open("test.db",{noMemInit:true}))
+const db = withExtensions(open("test.db",{noMemInit:true,indexOptions:{fulltext:true}}))
 db.clearSync();
-db.indexDB.clearSync();
 db.defineSchema(Object);
 await db.put("async",1);
 await db.put("sync",1);
@@ -56,7 +55,7 @@ let count = 0,
     log(event,1);
 }).run({});
 
-setTimeout(() => {
+//setTimeout(() => {
     (new Benchmark.Suite).add("getRangeFromIndex",() => {
         count = 0;
         for (const item of db.getRangeFromIndex({address:{city:"Albany"}})) {
@@ -181,4 +180,4 @@ setTimeout(() => {
             console.log("Full range length:",[...await db.getRangeFromIndex({name:"joe"})].length);
         })
         .run({} );
-},10000)
+//},10000)

@@ -1,4 +1,4 @@
-import {operators} from './operators.js';
+import {operators,DONE} from './operators.js';
 
 test("$type",() => {
     expect(operators.$type("hello",{test:"string"})).toBe("hello");
@@ -9,13 +9,13 @@ test("$type",() => {
 
 test("$lt",() => {
     expect(operators.$lt(1, {test: 2})).toBe(1);
-    expect(operators.$lt(2, {test: 2})).toBeUndefined();
+    expect([undefined,DONE].includes(operators.$lt(2, {test: 2}))).toBe(true);
 })
 
 test("$lte",() => {
     expect(operators.$lte(1, {test: 2})).toBe(1);
     expect(operators.$lte(2, {test: 2})).toBe(2);
-    expect(operators.$lte(3, {test: 2})).toBeUndefined();
+    expect([undefined,DONE].includes(operators.$lte(3, {test: 2}))).toBe(true);
 })
 
 test("$eq",() => {
@@ -49,7 +49,7 @@ test("$between",() => {
     expect(operators.$between(1, {test: [2,3]})).toBeUndefined();
     expect(operators.$between(2, {test: [2,3]})).toBe(2);
     expect(operators.$between(3, {test: [2,3]})).toBe(3);
-    expect(operators.$between(4, {test: [2,3]})).toBeUndefined();
+    expect([undefined,DONE].includes(operators.$between(4, {test: [2,3]}))).toBe(true);
 })
 
 test("$outside",() => {
