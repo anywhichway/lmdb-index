@@ -122,9 +122,11 @@ async function patch(key,patch,version,ifVersion) {
                 keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
             for(const key of keysToRemove) {
                 await this.propertyIndex.remove(key, id);
+                await this.valueIndex.remove([key.pop(),...key],id);
             }
             for(const key of keysToAdd) {
                 await this.propertyIndex.put(key,id);
+                await this.valueIndex.put([key.pop(),...key],id);
             }
             return true;
         });
@@ -142,12 +144,10 @@ function put(put,key,value,cname,...args) { // do not declare this as async, it 
             if(await put.call(this,id,value,cname,...args)) {
                 if(schema) {
                     const keys = getKeys.call(this,value,schema.indexKeys);
-                    for(const key of keys) {
+                    for(const key of getKeys.call(this,value,schema.indexKeys)) {
                         await this.propertyIndex.put(key,id);
+                        await this.valueIndex.put([key.pop(),...key],id);
                     }
-                    //for(const key of keys) { // using a second loop to ensure that a database lock does not occur
-                     //   await this.valueIndex.put([key.pop(),...key],id);
-                    //}
                 }
                 return id;
             }
@@ -167,12 +167,10 @@ function putSync(putSync,key,value,cname,...args) {
            if(putSync.call(this,id,value,...args)) {
                 if(schema) {
                     const keys = getKeys.call(this,value,schema.indexKeys);
-                    for(const key of keys) {
+                    for(const key of getKeys.call(this,value,schema.indexKeys)) {
                         this.propertyIndex.putSync([...key],id);
+                        this.valueIndex.putSync([key.pop(),...key],id);
                     }
-                    //for(const key of keys) { // using a second loop to ensure that a database lock does not occur
-                    //    this.valueIndex.putSync([key.pop(),...key],id);
-                    //}
                 }
                 return id;
            }
@@ -192,6 +190,7 @@ async function remove(remove,key,ifVersion) {
                     id = key;
                 for(const key of getKeys.call(this,value,schema?.indexKeys)) {
                     await this.propertyIndex.remove(key,id);
+                    await this.valueIndex.remove([key.pop(),...key],id);
                 }
             }
             return key;
@@ -210,6 +209,7 @@ function removeSync(removeSync,key,ifVersion) {
                     id = key;
                 for(const key of getKeys.call(this,value,schema?.indexKeys)) {
                     this.propertyIndex.removeSync(key,id);
+                    this.valueIndex.removeSync([key.pop(),...key],id);
                 }
             }
             return key;
@@ -251,10 +251,8 @@ async function index(value,cname,...args) {
                 const keys = getKeys.call(this,value,schema.indexKeys);
                 for(const key of keys) {
                     await this.propertyIndex.put(key,id);
+                    await this.valueIndex.put([key.pop(),...key],id);
                 }
-               //for(const key of keys) {
-                 //   await this.valueIndex.put([key.pop(),...key],id);
-                //}
             }
             return id;
         }
@@ -272,10 +270,8 @@ function indexSync(value,cname,...args) {
                 const keys = getKeys.call(this,value,schema.indexKeys);
                 for(const key of keys) {
                     this.propertyIndex.putSync(key,id);
+                    this.valueIndex.putSync([key.pop(),...key],id);
                 }
-                //for(const key of keys) {
-                //    this.valueIndex.putSync([key.pop(),...key],id);
-                //}
             }
             return id;
         }
@@ -304,12 +300,12 @@ function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
         if(isSpecial(value)) {
             keys.push([...key,value])
         } else {
-            if(this?.indexOptions.fulltext) {
+            if(this?.indexOptions?.fulltext) {
                 tokenize(value).filter((token) => !STOPWORDS.includes(token)).forEach((token) => {
                     keys.push([...key,token])
                 })
             }
-            if(!this?.indexOptions.fulltext && !this.indexOptions?.trigram) {
+            if(!this?.indexOptions?.fulltext && !this.indexOptions?.trigram) {
                 keys.push([...key,value])
             }
         }
@@ -407,10 +403,17 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
             method,
             index,
             hasNull = start.includes(null);
-        if (!hasNull && ["boolean", "number", "string", "symbol"].includes(type) || value === null) {
-            arg = [...start, value];
-            method = "getValues";
-            index = this.propertyIndex;
+        if (["boolean", "number", "string", "symbol"].includes(type) || value === null) {
+            if(!hasNull) {
+                arg = [...start, value];
+                method = "getValues";
+                index = this.propertyIndex;
+            } else {
+                arg = {start:[value,...start.slice(0,start.indexOf(null))]};
+                key = [value,...key];
+                method = "getRange";
+                index = this.valueIndex;
+            }
         } else {
             arg = {start};
             method = "getRange";
@@ -439,9 +442,9 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
                     if(wasRegExp) continue;
                     break;
                 }
-                let toTest = item.key[item.key.length - 1];
+                let toTest = index===this.valueIndex ? item.key[0] : item.key[item.key.length - 1];
                 if (type === "function") {
-                    if((typeof(toTest)!=="string" || !fulltext) && [undefined,DONE].includes(value(toTest))) break;
+                    if(!(typeof(toTest)=="string" && fulltext) && [undefined,DONE].includes(value(toTest))) break;
                 } else if (value && type === "object") {
                     if(value instanceof RegExp) {
                         if(!value.test(toTest)) {

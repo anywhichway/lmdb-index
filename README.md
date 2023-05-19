@@ -282,11 +282,11 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   93.62 |    87.47 |   98.48 |    97.8 |
-lmdb-index     |   92.21 |    82.26 |   96.87 |   97.35 |
-index.js      |   92.21 |    82.26 |   96.87 |   97.35 | 54-56,115,270,423,433-434,488,511
-lmdb-index/src |     100 |    98.95 |     100 |     100 |
-operators.js  |     100 |    98.95 |     100 |     100 | 13,189
+All files       |   89.64 |    84.69 |   95.58 |   92.87 |
+lmdb-index     |    87.6 |    78.75 |   91.17 |   91.56 |
+index.js      |    87.6 |    78.75 |   91.17 |   91.56 | 54-56,116,179,244-276,309,456,475,540,563,613-614
+lmdb-index/src |     100 |    98.96 |     100 |     100 |
+operators.js  |     100 |    98.96 |     100 |     100 | 14,190
 
 # Release Notes (Reverse Chronological Order)
 
@@ -296,9 +296,13 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-06-19 v0.10.1 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
+2023-05-19 v0.11.0 Added an index to better support queries where the value is known but properties might be ambiguous.
 
-2023-06-17 v0.9.1 Removed un-necessary files from npm package.
+2023-05-19 v0.10.2 Fixed issues related to `indexOptions` not being passed in when database opened.
+
+2023-05-19 v0.10.1 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
+
+2023-05-17 v0.9.1 Removed un-necessary files from npm package.
 
 2023-06-17 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
 

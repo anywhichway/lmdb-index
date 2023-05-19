@@ -44,16 +44,22 @@ let count = 0,
 }).run({});
 (new Benchmark.Suite).add("index sync",() => {
     if(count>maxCount) return;
-    db.indexSync({name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
+    db.putSync(null,{name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
 (new Benchmark.Suite).add("index async",async () => {
     if(count<0) { count++;  return; }
-    await db.index({name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
+    await db.put(null,{name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
+/*(new Benchmark.Suite).add("index sync many",() => {
+    if(count<0) { count++;  return; }
+    db.indexSync({name:"bill",address:{city:"New York",state:"WA"},"#":`TestObject@${count--}`});
+}).on('cycle', async (event) => {
+    log(event,1);
+}).run({});*/
 
 //setTimeout(() => {
     (new Benchmark.Suite).add("getRangeFromIndex",() => {
@@ -109,7 +115,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with function",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({address:{city:(value) => value==="Albany" ? value : undefined}})) {
+        for (const item of db.getRangeFromIndex({address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})) {
             count++;
         }
     }).on('cycle', async (event) => {
@@ -117,7 +123,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with function first",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({address:{city:(value) => value==="Albany" ? value : undefined}})) {
+        for (const item of db.getRangeFromIndex({address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})) {
             count++;
             break;
         }
@@ -126,7 +132,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with literal and function one",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({age:21,address:{city:(value) => value==="New York" ? value : undefined}})) {
+        for (const item of db.getRangeFromIndex({age:21,address:{city:(value) => value==="New York" ? value : undefined}},null,null,{fulltext:true})) {
             count++;
         }
     }).on('cycle', async (event) => {
@@ -134,7 +140,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with literal and function",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}})) {
+        for (const item of db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})) {
             count++;
         }
     }).on('cycle', async (event) => {
@@ -142,7 +148,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with literal and function first",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}})) {
+        for (const item of db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})) {
             count++;
             break;
         }
@@ -151,7 +157,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex with RegExp",() => {
         count = 0;
-        for (const item of db.getRangeFromIndex({address:{city:/Albany/}})) {
+        for (const item of db.getRangeFromIndex({address:{city:/Albany/i}},null,null,{fulltext:true})) {
             count++;
         }
     }).on('cycle', async (event) => {
@@ -159,7 +165,7 @@ let count = 0,
     }).run({});
     (new Benchmark.Suite).add("getRangeFromIndex first",async () => {
         count = 0;
-        for (const item of db.getRangeFromIndex({address:{city:"Albany"}})) {
+        for (const item of db.getRangeFromIndex({address:{city:"Albany"}},null,null,{fulltext:true})) {
             count++;
             found = true;
             break;
@@ -176,7 +182,7 @@ let count = 0,
             console.log("found:",found);
             console.log("New York range length:",[...db.getRangeFromIndex({address:{city:"New York"}})].length);
             console.log("Albany range length:",[...db.getRangeFromIndex({address:{city:"Albany"}})].length);
-            console.log("literal and function length:",[...db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}})].length);
+            console.log("literal and function length:",[...db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})].length);
             console.log("Full range length:",[...await db.getRangeFromIndex({name:"joe"})].length);
         })
         .run({} );

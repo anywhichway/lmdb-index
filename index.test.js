@@ -3,7 +3,7 @@ import {withExtensions,operators} from "./index.js";
 
 const {$lt,$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
 
-const db = withExtensions(open("test.db",{noMemInit:true,indexOptions:{fulltext:true}}));
+const db = withExtensions(open("test.db",{indexOptions:{fulltext:true}}));
 
 class Person {
     constructor(config) {
