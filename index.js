@@ -18,6 +18,7 @@ import {move as lmdbMove} from "lmdb-move";
 import {patch as lmdbPatch} from "lmdb-patch";
 import {v4 as uuid} from "uuid";
 import {operators} from "./src/operators.js";
+import deepEqual from "fast-deep-equal";
 
 var STOPWORDS = [
     'a', 'about', 'after', 'ala', 'all', 'also', 'am', 'an', 'and', 'another', 'any', 'are',
@@ -42,27 +43,21 @@ function defineSchema(ctor,options={}) {
     options.ctor = ctor;
     const schema = this.schema[ctor.name] ||= {};
     Object.assign(schema,options);
-    //if(schema.indexKeys) {
-     //   schema.indexKeys = schema.indexKeys.map((key)=>key.split(".").map((part)=>part+=":").join(""));
-    //}
     return schema;
 }
 
 // todo clearAsync and clearSync should remove indexes
 
 async function clearAsync(clearAsync) {
-    return this.transaction(async ()=>{
-        await clearAsync.call(this)
-        if(this.propertyIndex) await this.propertyIndex.clearAsync()
-    });
+    await clearAsync()
+    if(this.propertyIndex) await this.propertyIndex.clearAsync();
+    if(this.valueIndex) this.valueIndex.clearAsync();
 }
 
 function clearSync(clearSync) {
-    return this.transactionSync(()=>{
-        clearSync.call(this)
-        if(this.propertyIndex) this.propertyIndex.clearSync();
-        if(this.valueIndex) this.valueIndex.clearSync();
-    });
+    clearSync()
+    if(this.propertyIndex) this.propertyIndex.clearSync();
+    if(this.valueIndex) this.valueIndex.clearSync();
 }
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
@@ -78,8 +73,8 @@ async function copy(key,destKey,overwrite,version,ifVersion) {
     return await lmdbCopy.call(this,key, destKey, overwrite, version, ifVersion) ? destKey : undefined;
 }
 
-function get(get,key,...args) {
-    const value = deserializeSpecial(null,get.call(this,key,...args));
+function get(get,key) {
+    const value = deserializeSpecial(null,get.call(this,key));
     if(value && typeof(value)==="object") {
         const cname = key.split("@")[0],
             schema = getSchema.call(this,cname);
@@ -113,7 +108,7 @@ async function patch(key,patch,version,ifVersion) {
         return this.childTransaction(async () => {
             patch = serializeSpecial()(patch);
             if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
-                throw new Error(`Unable to patch ${key}`);
+                return false;
             }
             const id = key,
                 patchKeys = getKeys.call(this,patch,schema.indexKeys),
@@ -121,12 +116,16 @@ async function patch(key,patch,version,ifVersion) {
                 keysToRemove = entryKeys.filter((ekey)=> patchKeys.some((pkey) => pkey.length==ekey.length && pkey.every((item,i)=> i==pkey.length-1 || item===ekey[i]))),
                 keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
             for(const key of keysToRemove) {
-                await this.propertyIndex.remove(key, id);
-                await this.valueIndex.remove([key.pop(),...key],id);
+                await this.propertyIndex.remove([...key, id]);
+                await this.valueIndex.remove([key.pop(),...key,id]);
             }
             for(const key of keysToAdd) {
-                await this.propertyIndex.put(key,id);
-                await this.valueIndex.put([key.pop(),...key],id);
+                const propertyKey = [...key,id],
+                    valueKey = [key.pop(),...key,id],
+                    propertyCount = this.propertyIndex.get(propertyKey)||0,
+                    valueCount = this.valueIndex.get(valueKey)||0;
+                await this.propertyIndex.put(propertyKey,propertyCount+1);
+                await this.valueIndex.put(valueKey,valueCount+1);
             }
             return true;
         });
@@ -135,48 +134,76 @@ async function patch(key,patch,version,ifVersion) {
 }
 
 function put(put,key,value,cname,...args) { // do not declare this as async, it will break lmdb internals
-    if(key==null) {
-        const schema = this.getSchema(cname||value);
-        cname ||= schema ? schema.ctor.name : value.constructor.name;
-        const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
-        return this.childTransaction(   async () => {
-            value = serializeSpecial()(null,value);
-            if(await put.call(this,id,value,cname,...args)) {
+    value = serializeSpecial()(null, value);
+    const type = typeof(value),
+        schema = this.getSchema(cname||value),
+        hasCname = !!cname;
+    cname ||= schema ? schema.ctor.name : value.constructor.name;
+    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value && typeof(value)==="object" ? (value["#"] ||= key || `${cname}@${uuid()}`) : undefined);
+    if(key==null || id!==undefined) {
+            if(id && key && id!==key) {
+                throw new Error(`id ${id} does not match key ${key}`);
+            }
+           return this.childTransaction(   async () => {
+            if(await put(id,value,...args)) {
                 if(schema) {
-                    const keys = getKeys.call(this,value,schema.indexKeys);
+                    let i = 0;
                     for(const key of getKeys.call(this,value,schema.indexKeys)) {
-                        await this.propertyIndex.put(key,id);
-                        await this.valueIndex.put([key.pop(),...key],id);
+                        const propertyKey = [...key,id],
+                            valueKey = [key.pop(),...key,id],
+                            propertyCount = i>0 ? this.propertyIndex.get(propertyKey)||0 : 0,
+                            valueCount = i>0 ? this.valueIndex.get(valueKey)||0 : 0;
+                        await this.propertyIndex.put(propertyKey,propertyCount+1);
+                        await this.valueIndex.put(valueKey,valueCount+1);
+                        i++;
                     }
                 }
                 return id;
             }
         });
     }
-    return put.call(this,key,value,...args).then((result)=> result ? key : undefined);
+    return put(key,value,...args).then((result)=> {
+        return result ? key : undefined
+    });
 }
 
 function putSync(putSync,key,value,cname,...args) {
-    if(key==null) {
-        //return this.indexSync(value,cname,...args);
-        const schema = this.getSchema(cname||value);
-        cname ||= schema ? schema.ctor.name : value.constructor.name;
-        const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
-        return this.transactionSync(  () => {
-            value = serializeSpecial()(null,value);
-           if(putSync.call(this,id,value,...args)) {
-                if(schema) {
-                    const keys = getKeys.call(this,value,schema.indexKeys);
+    //return this.indexSync(value,cname,...args);
+    value = serializeSpecial()(null, value);
+    const type = typeof(value),
+        schema = this.getSchema(cname || value),
+        hasCname = !!cname;
+    cname ||= schema ? schema.ctor.name : value.constructor.name;
+    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : value && type==="object" ? (value["#"] ||= key || `${cname}@${uuid()}`) : undefined;
+    if(key==null || id!==undefined) {
+        if(id && key && id!==key) {
+            throw new Error(`id ${id} does not match key ${key}`);
+        }
+        return this.transactionSync(() => {
+            if (putSync(id, value, ...args)) {
+                if (schema) {
+                    let i = 0;
                     for(const key of getKeys.call(this,value,schema.indexKeys)) {
-                        this.propertyIndex.putSync([...key],id);
-                        this.valueIndex.putSync([key.pop(),...key],id);
+                        const propertyKey = [...key,id],
+                            valueKey = [key.pop(),...key,id],
+                            propertyCount = i>0 ? this.propertyIndex.get(propertyKey)||0 : 0,
+                            valueCount = i>0 ? this.valueIndex.get(valueKey)||0 : 0;
+                        this.propertyIndex.putSync(propertyKey,propertyCount+1);
+                        this.valueIndex.putSync(valueKey,valueCount+1);
+                        i++;
                     }
                 }
                 return id;
-           }
-       });
+            }
+        });
     }
-    return putSync.call(this,key,value,...args)===true ? key : undefined
+    // putSync always seems to return false, so we need to check the value ... UGB
+    const serialize = serializeSpecial();
+    putSync(key,serialize(null,value),...args);
+    const entry = this.getEntry(key, {versions: true});
+    // deepEqual sometimes fails when it should not, UGH
+    //if(deepEqual(serialize(entry.value),serialize(value)) && args[1]===entry.version) return key;
+    return JSON.stringify(serialize(entry.value))===JSON.stringify(value) && (args[0]===undefined || args[0]===entry.version) ? key : undefined;
 }
 
 async function remove(remove,key,ifVersion) {
@@ -189,8 +216,8 @@ async function remove(remove,key,ifVersion) {
                 const value = serializeSpecial()(entry.value),
                     id = key;
                 for(const key of getKeys.call(this,value,schema?.indexKeys)) {
-                    await this.propertyIndex.remove(key,id);
-                    await this.valueIndex.remove([key.pop(),...key],id);
+                    await this.propertyIndex.remove([key,id]);
+                    await this.valueIndex.remove([key.pop(),...key,id]);
                 }
             }
             return key;
@@ -208,8 +235,8 @@ function removeSync(removeSync,key,ifVersion) {
                 const value = serializeSpecial()(entry.value),
                     id = key;
                 for(const key of getKeys.call(this,value,schema?.indexKeys)) {
-                    this.propertyIndex.removeSync(key,id);
-                    this.valueIndex.removeSync([key.pop(),...key],id);
+                    this.propertyIndex.removeSync([key,id]);
+                    this.valueIndex.removeSync([key.pop(),...key,id]);
                 }
             }
             return key;
@@ -241,41 +268,11 @@ function getSchema(value,create) {
 }
 
 async function index(value,cname,...args) {
-    const schema = this.getSchema(cname||value);
-    cname ||= schema ? schema.ctor.name : value.constructor.name;
-    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
-    return this.childTransaction(   async () => {
-        value = serializeSpecial()(null,value);
-        if(await this.put(id,value,cname,...args)) {
-            if(schema) {
-                const keys = getKeys.call(this,value,schema.indexKeys);
-                for(const key of keys) {
-                    await this.propertyIndex.put(key,id);
-                    await this.valueIndex.put([key.pop(),...key],id);
-                }
-            }
-            return id;
-        }
-    });
+    return await this.put(null,value,cname,...args);
 }
 
 function indexSync(value,cname,...args) {
-    const schema = this.getSchema(cname||value);
-    cname ||= schema ? schema.ctor.name : value.constructor.name;
-    const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value["#"] ||= `${cname}@${uuid()}`);
-    return this.transactionSync(  () => {
-        value = serializeSpecial()(null,value);
-        if(this.putSync(id,value,cname,...args)) {
-            if(schema) {
-                const keys = getKeys.call(this,value,schema.indexKeys);
-                for(const key of keys) {
-                    this.propertyIndex.putSync(key,id);
-                    this.valueIndex.putSync([key.pop(),...key],id);
-                }
-            }
-            return id;
-        }
-    });
+    return this.putSync(null,value,cname,...args);
 }
 
 function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
@@ -384,12 +381,26 @@ const serializeSpecial = ({keepUndefined,keepRegExp}={}) => (key,value) => {
 
 const operatorFails = (value) => value==undefined || value===DONE;
 
-function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
+function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
     const yielded = new Set(),
         matches = new Map(),
         schema = this.getSchema(cname),
         keys = getKeys.call(this,serializeSpecial({keepRegExp:true})(null,pattern),schema?.indexKeys);
     let i = 0;
+    if(keys.length===0 && scan) {
+        const start = [cname+"@"];
+        try {
+            for(const entry of this.getRange({start})) {
+                if(!entry.key.startsWith(start)) {
+                    break;
+                }
+                yield {id:entry.key,count:0};
+            }
+        } catch(e) {
+            true; // above sometimes throws due to underlying lmdb issue
+        }
+        return;
+    }
     for(let key of keys) {
         const value = key.pop(),
             type = typeof (value),
@@ -402,11 +413,12 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
         let arg,
             method,
             index,
-            hasNull = start.includes(null);
+            hasNull = start.includes(null),
+            lengthBump = 2; // if getValues is ever used for index, this will need to be 1
         if (["boolean", "number", "string", "symbol"].includes(type) || value === null) {
             if(!hasNull) {
-                arg = [...start, value];
-                method = "getValues";
+                arg = {start:[...start, value]};
+                method = "getRange";
                 index = this.propertyIndex;
             } else {
                 arg = {start:[value,...start.slice(0,start.indexOf(null))]};
@@ -420,12 +432,12 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
             index = this.propertyIndex;
         }
         for (const item of index[method](arg)) {
-            const id = method === "getValues" ? item : item.value; // id is value when using getRange since getRange is accessing index
+            const id = method === "getValues" ? item : item.key[item.key.length-1]; // id is value when using getRange since getRange is accessing index
             if (cname && !id.startsWith(cname+"@")) {
                 continue;
             }
             if (method === "getRange") {
-                if(item.key.length!==start.length+1) {
+                if(item.key.length!==start.length+lengthBump) {
                     continue;
                 }
                 let wasRegExp;
@@ -442,7 +454,7 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
                     if(wasRegExp) continue;
                     break;
                 }
-                let toTest = index===this.valueIndex ? item.key[0] : item.key[item.key.length - 1];
+                let toTest = index===this.valueIndex ? item.key[0] : item.key[item.key.length - 2];
                 if (type === "function") {
                     if(!(typeof(toTest)=="string" && fulltext) && [undefined,DONE].includes(value(toTest))) break;
                 } else if (value && type === "object") {
@@ -451,17 +463,18 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext}={}) {
                             continue;
                         }
                     }
-                    // objects always match indexes, resolved at value test, effectively a table scan
+                    // objects always match indexes, resolved at value test
                 } else if (toTest !== value) {
                     continue;
                 }
             }
+            const count = method=== "getRange" ? item.value : 1;
             if (i === 0) {
                 if(keys.length===1 && !yielded.has(id) && 1>=minScore) {
                     yielded.add(id);
-                    yield {id,count:1};
+                    yield {id,count};
                 }
-                matches.set(id, 1);
+                matches.set(id, count);
             } else {
                 let count = matches.get(id);
                 if (count >= 1) {
@@ -533,12 +546,6 @@ const deepCopy = (value) => {
     if(["symbol","function"].includes(type)) {
         return value;
     }
-    if(type==="string") {
-        return value.split("").join("");
-    }
-    if(!value || type!=="object") {
-        return value;
-    }
     try {
         return structuredClone(value);
     } catch(e) {
@@ -602,7 +609,7 @@ const selector = (value,pattern,{root=value,parent,key}={}) => {
     return pattern===value ? value : undefined;
 }
 
-function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,sort,sortable,minScore,limit=Infinity,offset=0}={}) {
+function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,sort,sortable,minScore,limit=Infinity,offset=0}={}) {
     cname ||= indexMatch.constructor.name!=="Object" ? indexMatch.constructor.name : undefined;
     if(sortable) sort = true;
     if(minScore===undefined) {
@@ -622,7 +629,7 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,sort,so
     }
     let i = 0;
     if (sortable||fulltext) {
-        const matches = [...matchIndex.call(this,indexMatch,{cname,minScore,sortable:sortable||fulltext,fulltext})],
+        const matches = [...matchIndex.call(this,indexMatch,{cname,scan,minScore,sortable:sortable||fulltext,fulltext})],
             items = sortable ? matches.sort(typeof(sort)==="function" ? sort : (a, b) => b.count - a.count) : matches;
         // entries are [id,count], sort descending by count
         for (const {id, count} of items) {
@@ -642,7 +649,7 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,sort,so
             }
         }
     } else {
-        for(const {id} of matchIndex.call(this,indexMatch,{cname,minScore})) {
+        for(const {id} of matchIndex.call(this,indexMatch,{cname,scan,minScore})) {
             const entry = this.getEntry(id, {versions: true});
             if (entry && (!valueMatch || valueMatch === entry.value || typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined)) {
                 if (offset <= 0) {
@@ -690,8 +697,8 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
 },{});
 
 const withExtensions = (db,extensions={}) => {
-    db.valueIndex = db.openDB(`${db.name}.valueIndex`,{dupSort:true,encoding:"ordered-binary"});
-    db.propertyIndex = db.openDB(`${db.name}.propertyIndex`,{dupSort:true,encoding:"ordered-binary"});
+    db.valueIndex = db.openDB(`${db.name}.valueIndex`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.propertyIndex = db.openDB(`${db.name}.propertyIndex`); //,{dupSort:true,encoding:"ordered-binary"}
     //db.valueIndex = db.propertyIndex;
     /* index, indexSync */
     return lmdbExtend(db,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index, indexSync,move,patch,put,putSync,remove,removeSync,...extensions})

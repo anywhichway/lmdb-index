@@ -3,7 +3,7 @@ import {withExtensions,operators} from "./index.js";
 
 const {$lt,$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
 
-const db = withExtensions(open("test.db",{indexOptions:{fulltext:true}}));
+const db = withExtensions(open("test.db",{useVersions:true,indexOptions:{fulltext:true}}));
 
 class Person {
     constructor(config) {
@@ -14,9 +14,33 @@ class Person {
 db.clearSync();
 const now = new Date(),
     personSchema = db.defineSchema(Person,{indexKeys:["name","age","address.city","address.state","created","aRegExp"]}),
-    person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/},
-    personId =  db.putSync(null,{...person},"Person");
+    person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/,"unindexed":"unindexed"};
+let personId;
 
+test("put returns id",async () => {
+    const id = await db.put(null,{...person,"#":"Person@1"},"Person");
+    personId = id;
+    expect(id).toBe("Person@1");
+});
+
+test("putSync returns key",async () => {
+    const id = db.putSync(null,{...person,"#":"Person@1"},"Person");
+    personId = await id;
+    expect(id).toBe("Person@1");
+});
+
+test("putSync primitive returns key",async () => {
+    const key = db.putSync("one",1);
+    expect(key).toBe("one");
+})
+
+test("getRangeFromIndex - scan",() => {
+    const range = [...db.getRangeFromIndex({unindexed:"unindexed"},null,null,{cname:"Person",scan:true})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    delete range[0].value["#"];
+    expect(range[0].value).toEqual(person);
+})
 
 test("redefine Schema",() => {
     const schema = db.defineSchema(personSchema.ctor,{indexKeys:["name","age","address.city","address.state","created","aRegExp"]});
@@ -43,8 +67,8 @@ test("getSchema fail - from instance",() => {
     expect(schema).toBeUndefined()
 })
 
-test("put un-indexed",() => {
-    const id = db.putSync(null, {});
+test("put un-indexed",async () => {
+    const id = await db.put(null, {});
     expect(id).toBeDefined();
 })
 
@@ -73,6 +97,7 @@ test("getRangeFromIndex",() => {
     expect(range[0].value).toEqual(person);
 })
 
+
 test("getRangeFromIndex with operator",() => {
     const range = [...db.getRangeFromIndex({name:$or($eq("joe"),$neq("joe")),age:$and($gte(21),$gt(20))},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
@@ -81,8 +106,8 @@ test("getRangeFromIndex with operator",() => {
     expect(range[0].value).toEqual(person);
 })
 
-test("getRangeFromIndex with uper bound operator",() => {
-    const id = db.putSync(null,new Person({age:24}));
+test("getRangeFromIndex with upper bound operator",async () => {
+    const id = await db.put(null,new Person({age:24}));
     const range = [...db.getRangeFromIndex({age:$lt(24)},null,null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
@@ -217,10 +242,10 @@ test("getRangeFromIndex - sortable",() => {
     expect(Object.keys(range[0].value).length).toBe(1);
 })
 
-test("getRangeFromIndex - fulltext",() => {
-    const ids = [db.putSync(null,new Person({name:"john jones"})),
-            db.putSync(null,new Person({name:"john johnston"})),
-            db.putSync(null,new Person({name:"john johnson"}))];
+test("getRangeFromIndex - fulltext",async () => {
+    const ids = [await db.put(null,new Person({name:"john jones"})),
+            await db.put(null,new Person({name:"john johnston"})),
+            await db.put(null,new Person({name:"john johnson"}))];
     const range = [...db.getRangeFromIndex({name:"john johnson"},null, null,{cname:"Person",fulltext:true})];
     expect(range.length).toBe(3);
     expect(range[0].value).toBeInstanceOf(Person);
@@ -228,19 +253,52 @@ test("getRangeFromIndex - fulltext",() => {
     ids.forEach((id) => db.removeSync(id))
 })
 
-test("getRangeFromIndex - fulltext percentage",() => {
-    db.putSync(null,new Person({name:"john jones"}));
-    db.putSync(null,new Person({name:"john johnston"}));
-    db.putSync(null,new Person({name:"john johnson"}));
+test("getRangeFromIndex - fulltext percentage",async () => {
+    await db.put(null,new Person({name:"john jones"}));
+    await db.put(null,new Person({name:"john johnston"}));
+    await db.put(null,new Person({name:"john johnson"}));
     const range = [...db.getRangeFromIndex({name:"john johnson"},null, null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
     expect(range[0].value.name.startsWith("john")).toBe(true);
 })
 
-test("put",async () => {
-    const p = new Person(person),
-        id = await db.putSync(null,p);
+test("put no index",async () => {
+    const range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})],
+        p = {...person},
+        id = await db.put("noindex",p);
+    expect(id).toBe("noindex");
+    const value = db.get(id);
+    delete value["#"];
+    expect(value).toEqual(person);
+    expect([...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})].length).toBe(range.length);
+})
+
+test("put no index - throws",async () => {
+    let error;
+    const p = new Person({...person,"#": "DummyId"});
+    try {
+        await db.put("noindex",p)
+    } catch(e) {
+        error = e;
+    }
+    expect(error).toBeInstanceOf(Error);
+})
+
+test("putSync no index - throws",async () => {
+    let error;
+    const p = new Person({...person,"#": "DummyId"});
+    try {
+        await db.putSync("noindex",p)
+    } catch(e) {
+        error = e;
+    }
+    expect(error).toBeInstanceOf(Error);
+})
+
+test("put and index object",async () => {
+    const p = new Person({...person}),
+        id = await db.put(null,p);
     expect(id.startsWith("Person@")).toBe(true);
     const value = db.get(id);
     expect(value).toBeInstanceOf(Person);
@@ -253,6 +311,7 @@ test("put",async () => {
     expect(range.length).toBe(2);
     expect(range.every((item) => item.value instanceof Person)).toBe(true);
 })
+
 
 test("offset",() => {
     const p = new Person(person),
@@ -322,6 +381,11 @@ test("patch",async () => {
     expect(range.every((item) => item.value instanceof Person && item.value.age===22)).toBe(true);
 })
 
+test("patch fail",async () => {
+    const result = await db.patch(personId,{age:22,created:new Date()},1,1);
+    expect(result).toBe(false);
+})
+
 test("patch schemaless object",async () => {
     const id = await db.put(null,{name:"joe",age:21}),
         result = await db.patch(id,{age:22}),
@@ -381,6 +445,22 @@ test("get object of class with similar attributes",async () => {
     const range2 = [...db.getRangeFromIndex({name:"joe"})];
     expect(range2.length).toBe(3);
     expect(range2.some((item) => item.value instanceof Book || item.value instanceof Person)).toBe(true);
+})
+
+test("clearSync",async () => {
+    const id = await db.put(null,{...person},"Person");
+    db.clearSync();
+    expect(db.get(id)).toBe(undefined);
+    expect([...db.propertyIndex.getRange()].length).toBe(0);
+    expect([...db.valueIndex.getRange()].length).toBe(0);
+})
+
+test("clearAsync",async () => {
+    const id = await db.put(null,{...person});
+    await db.clearAsync();
+    expect(db.get(id)).toBe(undefined);
+    expect([...db.propertyIndex.getRange()].length).toBe(0);
+    expect([...db.valueIndex.getRange()].length).toBe(0);
 })
 
 

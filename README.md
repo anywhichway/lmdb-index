@@ -93,7 +93,7 @@ Returns the schema for the class of the object or `undefined`.
 
 If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
 
-#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{cname,sortable,fulltext,sort:boolean|function,versions,offset,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?fulltext:boolean,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
 Yields objects of the form `{key,value,count,version}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches, `version` is the version number and is only present if the database was opened using versioning.
 
@@ -142,6 +142,8 @@ await db.put(null,new Pet({name:"bill",age:2}));
 });
 ```
 
+`scan` tells the database to scan the class instances if no indexed fields are present in the `indexMatch` and test each one. 
+
 `sortable`, `'fulltext`, and `sort` start returning entries almost immediately based on partial index matches.
 
 `sortable` and `fulltext` return entries in the order they are indexed.
@@ -179,17 +181,23 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
-If `value` is an object, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+When putting an object for indexing, the `key` should be `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
-When putting an object for indexing, the `key` should eb `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
+If `value` is an object and `key` is `null`, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
+
+When an object is indexed `db.get` and `db.getEntry` with return the object as an instance of its original class.
 
 The `cname` argument is used to specify the class name of the object being put. If `cname` is not provided, the class name is determined by the constructor name of the `value` argument. This allows the developer to use plain objects. If `value` is a primitive, `cname` is ignored.
 
 If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
 
-The `key` or in the case of objects the object id is returned if the transaction succeeds, otherwise `undefined` is returned.
+The `key` or the object id (in the case of indexed object) is returned if the transaction succeeds, otherwise `undefined` is returned.
 
-See `db.index` to avoid the need for a `null` first argument and more information.
+#### db.putSync(key:LMDBKey,value,?cname,?version,?ifVersion) - returns LMDBKey|undefined
+
+Synchronous version of `db.put`. 
+
+***DO NOT USE***: An underlying issue with `lmdb` results in this occassionally returning a Promise instead of a value. Use `await db.put` instead.
 
 #### async db.remove(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
@@ -282,11 +290,13 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   89.64 |    84.69 |   95.58 |   92.87 |
-lmdb-index     |    87.6 |    78.75 |   91.17 |   91.56 |
-index.js      |    87.6 |    78.75 |   91.17 |   91.56 | 54-56,116,179,244-276,309,456,475,540,563,613-614
+All files       |   94.82 |     87.3 |   98.48 |   98.44 |
+lmdb-index     |   93.82 |    82.76 |   96.87 |   98.16 |
+index.js      |   93.82 |    82.76 |   96.87 |   98.16 | 271-275,306,395,488,570,620-621
 lmdb-index/src |     100 |    98.96 |     100 |     100 |
 operators.js  |     100 |    98.96 |     100 |     100 | 14,190
+
+Note: Lines 265-307 are for code that will be deprecated.
 
 # Release Notes (Reverse Chronological Order)
 
@@ -296,11 +306,13 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-05-21 v0.11.1 Enhanced documentation. Added unit tests. Added `scan` options to `db.getRangeFromIndex`. Fixed issue with `putSync` where special values were not getting serialized and underlying `lmdb` library falsely reporting a `db.putSync` failed. Improved fulltext index matching counts when the same word is repeated. Discovered and documented that `db.putSync` sometimes returns a Promise. Advise against using.
+
 2023-05-19 v0.11.0 Added an index to better support queries where the value is known but properties might be ambiguous.
 
 2023-05-19 v0.10.2 Fixed issues related to `indexOptions` not being passed in when database opened.
 
-2023-05-19 v0.10.1 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead.. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
+2023-05-19 v0.10.1 Refined operator functions that are order dependent so they return `DONE` after upper bound. `db.clearAsync` and `db.clearSync` now clear indexes. `db.putSync` returning Promise. Corrected v0.9.1 and v0.9.0 dates below. Minor modifications to index structure. `db.index` and `db.indexSync` will be deprecated prior to v1, use `db.put(null,object)` or `db.putsync(null,object)` instead. BREAKING CHANGE: Fulltext indexing must now be enabled with `indexOptions:{fulltext:true}` when opening a database.
 
 2023-05-17 v0.9.1 Removed un-necessary files from npm package.
 
