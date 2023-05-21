@@ -250,17 +250,22 @@ test("getRangeFromIndex - fulltext",async () => {
     expect(range.length).toBe(3);
     expect(range[0].value).toBeInstanceOf(Person);
     expect(range.every((item) => item.value.name.startsWith("john"))).toBe(true);
-    ids.forEach((id) => db.removeSync(id))
+    for(const id of ids) {
+        await db.remove(id)
+    }
 })
 
-test("getRangeFromIndex - fulltext percentage",async () => {
-    await db.put(null,new Person({name:"john jones"}));
-    await db.put(null,new Person({name:"john johnston"}));
-    await db.put(null,new Person({name:"john johnson"}));
+test("getRangeFromIndex - fulltext all",async () => {
+    const ids = [await db.put(null,new Person({name:"john jones"})),
+        await db.put(null,new Person({name:"john johnston"})),
+        await db.put(null,new Person({name:"john johnson"}))];
     const range = [...db.getRangeFromIndex({name:"john johnson"},null, null,{cname:"Person"})];
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
-    expect(range[0].value.name.startsWith("john")).toBe(true);
+    expect(range[0].value.name).toBe("john johnson");
+    for(const id of ids) {
+        await db.remove(id)
+    }
 })
 
 test("put no index",async () => {

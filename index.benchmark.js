@@ -27,21 +27,21 @@ let count = 0,
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("put primitive sync",() => {
+/*(new Benchmark.Suite).add("put primitive sync",() => {
     db.putSync("sync",2);
 }).on('cycle', async (event) => {
     log(event,1);
-}).run({});
+}).run({});*/
 (new Benchmark.Suite).add("get primitive for async",() => {
     db.get("async");
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
-(new Benchmark.Suite).add("get primitive for sync",() => {
+/*(new Benchmark.Suite).add("get primitive for sync",() => {
     db.get("sync");
 }).on('cycle', async (event) => {
     log(event,1);
-}).run({});
+}).run({});*/
 (new Benchmark.Suite).add("index sync",() => {
     if(count>maxCount) return;
     db.putSync(null,{name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});

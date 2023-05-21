@@ -56,7 +56,7 @@ if(id) {
         address:{city:"York"} // fulltext indexing turned on, partial matches returned so long as `valueMatch` is relaxed
     },(value)=>value)].forEach((person) => {
         console.log(person)
-    });
+    },null,{fulltext:true});
 }
 ```
 ## API
@@ -197,17 +197,23 @@ The `key` or the object id (in the case of indexed object) is returned if the tr
 
 Synchronous version of `db.put`. 
 
-***DO NOT USE***: An underlying issue with `lmdb` results in this occassionally returning a Promise instead of a value. Use `await db.put` instead.
+***DO NOT USE***: An underlying issue with `lmdb` results in this occasionally returning a Promise instead of a value. Use `await db.put` instead.
 
 #### async db.remove(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
 Same behavior as `lmdb` except that the index entries are removed inside a transaction
 
+#### db.removeSync(key:LMDBKey,?version:number,?ifVersion:number) - returns LMDBKey|undefined
+
+Synchronous version of `db.remove`.
+
+***DO NOT USE***: An underlying issue with `lmdb` results in this occasionally returning a Promise instead of a value. Use `await db.put` instead.
+
 #### withExtensions(db:LMDBDatabase,?extensions:object) - returns LMDBDatabase`
 
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
-Automatically adds `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `put`, `putSync`,`remove` and `removeSync`.
+Returns a child database that has the extensions `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `clearAsync`, clearSync`, `put`, `putSync`,`remove` and `removeSync`.
 
 ## Operators
 
@@ -296,7 +302,7 @@ index.js      |   93.82 |    82.76 |   96.87 |   98.16 | 271-275,306,395,488,570
 lmdb-index/src |     100 |    98.96 |     100 |     100 |
 operators.js  |     100 |    98.96 |     100 |     100 | 14,190
 
-Note: Lines 265-307 are for code that will be deprecated.
+Note: Lines 271-275 are for code that will be deprecated.
 
 # Release Notes (Reverse Chronological Order)
 
@@ -306,7 +312,9 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
-2023-05-21 v0.11.1 Enhanced documentation. Added unit tests. Added `scan` options to `db.getRangeFromIndex`. Fixed issue with `putSync` where special values were not getting serialized and underlying `lmdb` library falsely reporting a `db.putSync` failed. Improved fulltext index matching counts when the same word is repeated. Discovered and documented that `db.putSync` sometimes returns a Promise. Advise against using.
+2023-05-21 v0.11.2 Enhanced documentation. Addressed/documented underlying issues with `lmdb`: https://github.com/kriszyp/lmdb-js/issues/235 and https://github.com/kriszyp/lmdb-js/issues/234.
+
+2023-05-21 v0.11.1 Enhanced documentation. Added unit tests. Added `scan` option to `db.getRangeFromIndex`. Fixed issue with `putSync` where special values were not getting serialized and underlying `lmdb` library falsely reporting a `db.putSync` failed. Improved fulltext index matching counts when the same word is repeated. Discovered and documented that `db.putSync` sometimes returns a Promise. Advise against using.
 
 2023-05-19 v0.11.0 Added an index to better support queries where the value is known but properties might be ambiguous.
 

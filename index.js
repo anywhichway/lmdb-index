@@ -389,16 +389,16 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
     let i = 0;
     if(keys.length===0 && scan) {
         const start = [cname+"@"];
-        try {
+        //try {
             for(const entry of this.getRange({start})) {
                 if(!entry.key.startsWith(start)) {
                     break;
                 }
                 yield {id:entry.key,count:0};
             }
-        } catch(e) {
-            true; // above sometimes throws due to underlying lmdb issue
-        }
+       // } catch(e) {
+        //    true; // above sometimes throws due to underlying lmdb issue
+       // }
         return;
     }
     for(let key of keys) {
@@ -697,11 +697,13 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
 },{});
 
 const withExtensions = (db,extensions={}) => {
-    db.valueIndex = db.openDB(`${db.name}.valueIndex`); //,{dupSort:true,encoding:"ordered-binary"}
-    db.propertyIndex = db.openDB(`${db.name}.propertyIndex`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data = db.openDB(`${db.name}.data`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data.valueIndex = db.openDB(`${db.name}.valueIndex`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data.propertyIndex = db.openDB(`${db.name}.propertyIndex`); //,{dupSort:true,encoding:"ordered-binary"}
     //db.valueIndex = db.propertyIndex;
     /* index, indexSync */
-    return lmdbExtend(db,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index, indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
+    db.data.indexOptions = db.indexOptions;
+    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index, indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
 export {DONE,ANY,functionalOperators as operators,withExtensions}
