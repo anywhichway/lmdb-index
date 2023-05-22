@@ -10,7 +10,11 @@
 
 This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
-This is BETA software. The API is stable and unit test coverage exceeds 90%.
+This is BETA software. The API is stable and unit test coverage exceeds 99%.
+
+From an internal development perspective, v0.11.3 is the final BETA release. We will hold a few weeks for external feedback and then push v1.0.0. The first feature to be added after v1.0.0 will be vector support and similarity search
+
+A few stars on [GitHub](https://github.com/anywhichway/lmdb-index) or [documentation issues](https://github.com/anywhichway/lmdb-index/issues) would provide a little comfort regarding a v1.0.0 release :-).
 
 # Installation
 
@@ -87,13 +91,19 @@ To index all keys on all objects using UUIDs as ids and `#` as the id key, call 
 
 *Note*: All operations returning an object attempt to create an instance of the object's original class if a schema is defined.
 
+#### async db.index(value:object,?cname:string|undefined) - returns LMDBKey|undefined
+
+Inserts (puts) object and indexes it using the id property of the object or a generated id if no id property exists. Coerces value to class `cname` if provided. See `db.put(bull,value)` for full details.
+
+The id property defaults to `#` but can be set using `db.defineSchema(classConstructor,{idKey:"id"})`.
+
 #### db.getSchema(value:string|object,create:boolean) - returns object representing schema
 
 Returns the schema for the class of the object or `undefined`.
 
 If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
 
-#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?fulltext:boolean,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?fulltext:boolean|number,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
 
 Yields objects of the form `{key,value,count,version}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches, `version` is the version number and is only present if the database was opened using versioning.
 
@@ -148,7 +158,13 @@ await db.put(null,new Pet({name:"bill",age:2}));
 
 `sortable` and `fulltext` return entries in the order they are indexed.
 
-`fulltext` (short for full text index), returns entries that have partial matches for string property values. To fully utilize `fulltext`, ensure the database is opened and entries have been indexed with `{indexOptions:{fulltext:true}}`.
+`fulltext` (short for full text index), returns entries that have partial matches for string property values. 
+
+If `fulltext` is `true`, then all partial matches are returned.
+
+If `fulltext` is a number between 0 and 1, then only matches that exceed the number as a percent match are returned.
+
+To fully utilize `fulltext`, ensure the database is opened and entries have been indexed with `{indexOptions:{fulltext:true}}`.
 For example:
 
 ```javascript
@@ -296,13 +312,11 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   94.82 |     87.3 |   98.48 |   98.44 |
-lmdb-index     |   93.82 |    82.76 |   96.87 |   98.16 |
-index.js      |   93.82 |    82.76 |   96.87 |   98.16 | 271-275,306,395,488,570,620-621
+All files       |   95.68 |    87.87 |   99.24 |   99.41 |
+lmdb-index     |   94.85 |    83.56 |   98.43 |   99.31 |
+index.js      |   94.85 |    83.56 |   98.43 |   99.31 | 275,306,570
 lmdb-index/src |     100 |    98.96 |     100 |     100 |
 operators.js  |     100 |    98.96 |     100 |     100 | 14,190
-
-Note: Lines 271-275 are for code that will be deprecated.
 
 # Release Notes (Reverse Chronological Order)
 
@@ -311,6 +325,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+2023-05-22 v0.11.3 Enhanced documentation. Added unit tests. Resolved the underlying issue related to `db.index`, it will no longer be deprecated.
 
 2023-05-21 v0.11.2 Enhanced documentation. Addressed/documented underlying issues with `lmdb`: https://github.com/kriszyp/lmdb-js/issues/235 and https://github.com/kriszyp/lmdb-js/issues/234.
 

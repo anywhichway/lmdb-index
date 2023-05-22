@@ -23,6 +23,13 @@ test("put returns id",async () => {
     expect(id).toBe("Person@1");
 });
 
+test("index returns id",async () => {
+    const id = await db.index({...person,"#":"Person@1"},"Person");
+    personId = id;
+    expect(id).toBe("Person@1");
+});
+
+
 test("putSync returns key",async () => {
     const id = db.putSync(null,{...person,"#":"Person@1"},"Person");
     personId = await id;
@@ -255,6 +262,7 @@ test("getRangeFromIndex - fulltext",async () => {
     }
 })
 
+
 test("getRangeFromIndex - fulltext all",async () => {
     const ids = [await db.put(null,new Person({name:"john jones"})),
         await db.put(null,new Person({name:"john johnston"})),
@@ -263,6 +271,19 @@ test("getRangeFromIndex - fulltext all",async () => {
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
     expect(range[0].value.name).toBe("john johnson");
+    for(const id of ids) {
+        await db.remove(id)
+    }
+})
+
+test("getRangeFromIndex - fulltext pct",async () => {
+    const ids = [await db.put(null,new Person({name:"john andrew jones"})),
+        await db.put(null,new Person({name:"john johnston"})),
+        await db.put(null,new Person({name:"john johnson"}))];
+    const range = [...db.getRangeFromIndex({name:"john andrew johnson"},null, null,{cname:"Person",fulltext:.5})];
+    expect(range.length).toBe(1);
+    expect(range[0].value).toBeInstanceOf(Person);
+    expect(range.every((item) => item.value.name.startsWith("john"))).toBe(true);
     for(const id of ids) {
         await db.remove(id)
     }

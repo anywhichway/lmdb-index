@@ -617,8 +617,12 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
             if(fulltext===true) {
                 minScore = 0;
             } else {
-                const keys = getKeys.call(this,serializeSpecial()(indexMatch));
-                minScore = keys.length * fulltext;
+                if(typeof(fulltext)==="number" && fulltext>=0 && fulltext<=1) {
+                    const keys = getKeys.call(this,serializeSpecial()(indexMatch));
+                    minScore = keys.length * fulltext;
+                } else {
+                    throw new TypeError(`fulltext must be a number between 0 and 1, or true, not ${fulltext}`);
+                }
             }
         } else {
             minScore = 0;
@@ -703,7 +707,7 @@ const withExtensions = (db,extensions={}) => {
     //db.valueIndex = db.propertyIndex;
     /* index, indexSync */
     db.data.indexOptions = db.indexOptions;
-    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index, indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
+    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
 export {DONE,ANY,functionalOperators as operators,withExtensions}
