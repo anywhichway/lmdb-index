@@ -51,7 +51,7 @@ function defineSchema(ctor,options={}) {
 async function clearAsync(clearAsync) {
     await clearAsync()
     if(this.propertyIndex) await this.propertyIndex.clearAsync();
-    if(this.valueIndex) this.valueIndex.clearAsync();
+    if(this.valueIndex) await this.valueIndex.clearAsync();
 }
 
 function clearSync(clearSync) {

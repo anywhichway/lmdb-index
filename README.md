@@ -326,6 +326,8 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
 
+2023-06-01 v1.0.0 Fixed issue with `db.clearAsync` not awaiting all clears of child databases.
+
 2023-05-22 v0.11.3 Enhanced documentation. Added unit tests. Resolved the underlying issue related to `db.index`, it will no longer be deprecated.
 
 2023-05-21 v0.11.2 Enhanced documentation. Addressed/documented underlying issues with `lmdb`: https://github.com/kriszyp/lmdb-js/issues/235 and https://github.com/kriszyp/lmdb-js/issues/234.
