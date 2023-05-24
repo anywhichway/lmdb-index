@@ -43,21 +43,52 @@ function defineSchema(ctor,options={}) {
     options.ctor = ctor;
     const schema = this.schema[ctor.name] ||= {};
     Object.assign(schema,options);
+    schema.title = ctor.name;
+    schema.idKey ||= "#";
+    return schema;
+}
+
+function getSchema(value,create) {
+    this.schema ||= {};
+    const type = typeof(value);
+    if(!value || !["string","object"].includes(type)) return;
+    const cname = type==="object" ? value.constructor.name : value;
+    let schema = this.schema[cname] ||= this.schemata.get(cname)
+    if(!schema) {
+        if(create) {
+            return defineSchema.call(this,type==="object" ? value.constructor : new Function(`return function ${cname}(){};`)())
+        } else if(cname==="Object") {
+            return;
+        }
+        return this.schema[cname] = getSchema.call(this,Object.getPrototypeOf(value));
+    }
+    schema.title = cname;
+    schema.idKey ||= "#";
+    schema.keyGenerator ||= uuid;
+    schema.create ||= function (value)  { // this is the create function for a schema and does nto have to do with the `create` flag above to create the schema itself
+        this.ctor ||= new Function(`return function ${this.title}(){};`)();
+        const instance = Object.assign(this.ctor===Array ? [] : Object.create(this.ctor.prototype),value);
+        return instance;
+    };
     return schema;
 }
 
 // todo clearAsync and clearSync should remove indexes
 
-async function clearAsync(clearAsync) {
+async function clearAsync(clearAsync,clearSchema) {
     await clearAsync()
     if(this.propertyIndex) await this.propertyIndex.clearAsync();
-    if(this.valueIndex) this.valueIndex.clearAsync();
+    if(this.valueIndex) await this.valueIndex.clearAsync();
+    if(this.vectors) await this.vectors.clearAsync();
+    if(clearSchema && this.schemata) await this.schemata.clearAsync();
 }
 
-function clearSync(clearSync) {
+function clearSync(clearSync,clearSchema) {
     clearSync()
     if(this.propertyIndex) this.propertyIndex.clearSync();
     if(this.valueIndex) this.valueIndex.clearSync();
+    if(this.vectors) this.vectors.clearSync();
+    if(clearSchema && this.schemata) this.schemata.clearSync();
 }
 
 async function copy(key,destKey,overwrite,version,ifVersion) {
@@ -83,6 +114,120 @@ function get(get,key) {
     return value;
 }
 
+async function learnSchema(values,{cname,vectors,put,baseURI="",$schema,schemata={}}={}) {
+    for(let value of values) {
+        if(!value || typeof(value)!=="object") continue;
+        cname ||= value.constructor.name;
+        const schema = getSchema.call(this,cname,true);
+        schemata[cname] ||= schema;
+        if(this.useVectors && vectors===undefined) {
+            vectors = Array.isArray(this.useVectors) ? this.useVectors.includes(cname) : true;
+        }
+        if($schema) {
+            schema.$schema ||= $schema;
+        }
+        schema.$id ||= `${baseURI}/${cname.toLowerCase()}.schema.json`;
+        schema.title = cname;
+        if(value && typeof(value)==="object" && [Date,RegExp,Uint8Array,Uint16Array,Uint32Array,Uint8ClampedArray].some((ctor)=>value instanceof ctor)) {
+            continue;
+        }
+        value = serializeSpecial()(null,value);
+        for(const key of getKeys.call(this,value,null,{noTokens:true})) {
+            schema.indexKeys ||= [];
+            const keyStr = key.slice(0,key.length-1).join(".");
+            if(!schema.indexKeys.includes(keyStr)) {
+                schema.indexKeys.push(keyStr);
+            }
+            if(key[0]!==schema.idKey) {
+                schema.properties ||= {};
+                let node = schema.properties,
+                    object = value;
+                for(let i=0;i<key.length-i;i++) {
+                    const property = key[i],
+                        v = object[property],
+                        type = Array.isArray(v) ? "array" : typeof(v);
+                    node = node[property] ||= {type};
+                    if(node.type!==type) throw new Error(`type mismatch for ${property}`);
+                    if(type==="string") {
+                        node.enum ||= [];
+                        if(!node.enum.includes(v)) {
+                            node.enum.push(v);
+                        }
+                    } else if(type==="number") {
+                        node.minimum = Math.min(node.minimum||v,v);
+                        node.maximum = Math.max(node.maximum||v,v);
+                    } else if(type==="array") {
+                        object = v;
+                        if(value.constructor.name==="Array") {
+                            node.minItems = Math.min(node.minItems||v.length,v.length);
+                            node.maxItems = Math.max(node.maxItems||v.length,v.length);
+                            if(node.uniqueItems!==false) {
+                                node.uniqueItems = value.every((v,i)=>value.indexOf(v)===i);
+                            }
+                            if(node.items!==false) {
+                                node.items ||= {};
+                                if(value.some((item,i) => typeof(item)!==typeof(v[0]))) {
+                                    node.items = false
+                                } else {
+                                    node.items.type = typeof(v[0])
+                                }
+                            }
+                        } else {
+                            this.learnSchema([v],{vectors,put,baseURI,$schema,schemata});
+                            node.$ref = schema[v.constructor.name].$id;
+                        }
+                    } else if(type==="object") {
+                        object = v;
+                        if(object.constructor.name!=="Object") {
+                            this.learnSchema([v],{vectors,put,baseURI,$schema,schemata});
+                            node.$ref = schemata[object.constructor.name].$id;
+                        }
+                    }
+                    if(i===0) {
+                        let required;
+                        for(const item of values) {
+                            if(item[property]===undefined)  {
+                                required = false;
+                                break;
+                            }
+                        }
+                        if(required) {
+                            schema.required ||= [];
+                            if(!schema.required.includes(property)) {
+                                schema.required.push(property);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if(!schema.indexKeys.includes(schema.idKey)) {
+            schema.indexKeys.push(schema.idKey);
+        }
+        if(!schema.properties[schema.idKey]) {
+            schema.properties[schema.idKey] = {type:"string"};
+        }
+        if(vectors) {
+            for(const key of getKeys.call(this,value,schema.vectorKeys,{noTokens:true})) {
+                const value = key[key.length-1],
+                    type = typeof(value);
+                if(type==="string" || type==="number") {
+                    schema.vectorKeys ||= []; // it is correct to do this after the call to getKeys
+                    key.pop();
+                    const keyStr = key.join(".");
+                    if(!schema.vectorKeys.includes(keyStr)) schema.vectorKeys.push(keyStr);
+                }
+            }
+        }
+    }
+    if(put) {
+        for(const [cname,schema] of Object.entries(schemata)) {
+            await this.schemata.put(cname,schema);
+        }
+    }
+    return schemata;
+}
+
 async function move(key,destKey,overwrite,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true}),
         cname = entry.value.constructor.name,
@@ -93,17 +238,15 @@ async function move(key,destKey,overwrite,version,ifVersion) {
         entry.value[idKey] = destKey;
         destKey = null;
     }
-    return this.transaction(async () => {
-        if (!await this.remove(key, version, ifVersion)) return;
-        return await this.put(destKey, entry.value, version);
-    });
+    if (!await this.remove(key, version, ifVersion)) return;
+    return await this.put(destKey, entry.value, version);
 }
 
 async function patch(key,patch,version,ifVersion) {
     const entry = this.getEntry(key, {versions: true}),
         cname = entry.value.constructor.name,
         isObject = entry.value && typeof (entry.value) === "object",
-        schema = isObject ? getSchema.call(this, cname) : null;
+        schema = isObject ? getSchema.call(this, cname,this.learnSchema) : null;
     if(schema) {
         return this.childTransaction(async () => {
             patch = serializeSpecial()(patch);
@@ -120,12 +263,14 @@ async function patch(key,patch,version,ifVersion) {
                 await this.valueIndex.remove([key.pop(),...key,id]);
             }
             for(const key of keysToAdd) {
+                // todo: add schema learning
                 const propertyKey = [...key,id],
                     valueKey = [key.pop(),...key,id],
                     propertyCount = this.propertyIndex.get(propertyKey)||0,
                     valueCount = this.valueIndex.get(valueKey)||0;
                 await this.propertyIndex.put(propertyKey,propertyCount+1);
                 await this.valueIndex.put(valueKey,valueCount+1);
+                // todo: add vector support
             }
             return true;
         });
@@ -133,7 +278,7 @@ async function patch(key,patch,version,ifVersion) {
     return lmdbPatch.call(this,key,patch,version,ifVersion);
 }
 
-function put(put,key,value,cname,...args) { // do not declare this as async, it will break lmdb internals
+async function put(put,key,value,cname,...args) {
     value = serializeSpecial()(null, value);
     const type = typeof(value),
         schema = this.getSchema(cname||value),
@@ -144,7 +289,7 @@ function put(put,key,value,cname,...args) { // do not declare this as async, it 
             if(id && key && id!==key) {
                 throw new Error(`id ${id} does not match key ${key}`);
             }
-           return this.childTransaction(   async () => {
+           return this.transaction(   async () => {
             if(await put(id,value,...args)) {
                 if(schema) {
                     let i = 0;
@@ -157,6 +302,8 @@ function put(put,key,value,cname,...args) { // do not declare this as async, it 
                         await this.valueIndex.put(valueKey,valueCount+1);
                         i++;
                     }
+                    const vector = getVector.call(this,value,cname)
+                    if(vector?.length) await this.vectors.put(id,vector);
                 }
                 return id;
             }
@@ -219,6 +366,7 @@ async function remove(remove,key,ifVersion) {
                     await this.propertyIndex.remove([key,id]);
                     await this.valueIndex.remove([key.pop(),...key,id]);
                 }
+                await this.vectors.remove(id);
             }
             return key;
         }
@@ -244,29 +392,6 @@ function removeSync(removeSync,key,ifVersion) {
     })
 }
 
-function getSchema(value,create) {
-    this.schema ||= {};
-    const type = typeof(value);
-    if(!value || !["string","object"].includes(type)) return;
-    const cname = type==="object" ? value.constructor.name : value;
-    let schema = this.schema[cname];
-    if(!schema) {
-        if(create) {
-            defineSchema.call(this,value.constructor)
-        } else if(cname==="Object") {
-            return;
-        }
-        return this.schema[cname] = getSchema.call(this,Object.getPrototypeOf(value));
-    }
-    schema.idKey ||= "#";
-    schema.keyGenerator ||= uuid;
-    schema.create ||= function (value)  { // this is the create function for a schema and does nto have to do with the `create` flag above to create the schema itself
-        const instance = Object.assign(this.ctor===Array ? [] : Object.create(this.ctor.prototype),value);
-        return instance;
-    };
-    return schema;
-}
-
 async function index(value,cname,...args) {
     return await this.put(null,value,cname,...args);
 }
@@ -275,10 +400,10 @@ function indexSync(value,cname,...args) {
     return this.putSync(null,value,cname,...args);
 }
 
-function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
+function getKeys(key,value,schemaKeys,{noTokens,keys= [],hasRegExp}={}) {
     const keyType = typeof(key);
     if(key && keyType==="object" && !Array.isArray(key)) {
-        return getKeys.call(this,[],key,value,keys);
+        return getKeys.call(this,[],key,value,schemaKeys);
     }
     const type = typeof(value);
     if(value && type==="object") {
@@ -289,12 +414,14 @@ function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
                 const regExp = toRegExp(entry[0]),
                     next = regExp ? regExp: entry[0];
                 if(regExp || hasRegExp || !schemaKeys || schemaKeys.some((schemaKey) => schemaKey.startsWith([...key,next].join(".")))) {
-                    getKeys.call(this, [...key,next],entry[1],schemaKeys,keys,!!regExp);
+                    getKeys.call(this, [...key,next],entry[1],schemaKeys,{noTokens,keys,hasRegExp:!!regExp});
                 }
             }
         }
     } else if(type==="string") {
         if(isSpecial(value)) {
+            keys.push([...key,value])
+        } else if(noTokens) {
             keys.push([...key,value])
         } else {
             if(this?.indexOptions?.fulltext) {
@@ -310,6 +437,50 @@ function getKeys(key,value,schemaKeys,keys= [],hasRegExp) {
         keys.push([...key,value])
     }
     return keys;
+}
+
+function euclidianDistance(a, b) {
+    return a
+            .map((x, i) => Math.abs( x - b[i] ) ** 2) // square the difference
+            .reduce((sum, now) => sum + now) // sum
+        ** (1/2)
+}
+
+function getVector(value,cname) {
+    const schema = this.getSchema(cname||value);
+    if(!schema.vectorKeys) return;
+    const vector = [],
+        keys = getKeys.call(this,value,schema.vectorKeys,{noTokens: true});
+    schema.vectorKeys.forEach((vectorKey) => {
+        if(!keys.some((key) => {
+            key = key.slice(0,key.length-1).join(".");
+            return key===vectorKey
+        })) {
+            keys.push([...vectorKey.split("."),null])
+        }
+    });
+    keys.sort((a,b) => {
+            a = a.slice(0,a.length-1).join(".");
+            b = b.slice(0,b.length-1).join(".");
+            return schema.vectorKeys.indexOf(a) - schema.vectorKeys.indexOf(b)
+        });
+    return keys.map((key) => {
+        const def = schema.properties[key[0]], // todo: handle nesting
+            value = key[key.length-1];
+        if(value===null) return null;
+        if(def.enum) {
+            for(let i=0;i<def.enum.length;i++) {
+                if(def.enum[i].toLowerCase()===value.toLowerCase()) {
+                    return (i+1)/def.enum.length;
+                }
+            }
+        }
+        if(def.type==="number") {
+            // normalize to 0-1
+            const range = def.maximum - def.minimum;
+            return range ? (value - def.minimum) / range : range;
+        }
+    });
 }
 
 const isRegExp = (value) => value instanceof RegExp || value.constructor.name==="RegExp";
@@ -637,9 +808,9 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
             items = sortable ? matches.sort(typeof(sort)==="function" ? sort : (a, b) => b.count - a.count) : matches;
         // entries are [id,count], sort descending by count
         for (const {id, count} of items) {
-            const entry = this.getEntry(id, {versions: true}),
-                value = deserializeSpecial(null,entry.value);
-            if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, value) !== undefined : valueMatch(value) !== undefined))) {
+            const entry = this.getEntry(id, {versions: true});
+                //value = entry ? deserializeSpecial(null,entry.value) : undefined;
+            if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined))) {
                 if (offset <= 0) {
                     i++;
                     if(select) {
@@ -671,6 +842,60 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
     }
 }
 
+function *getRangeFromVector(vectorMatch,valueMatch,select,{cname,distance=euclidianDistance,sort=true,maxDistance=Infinity,limit=Infinity,offset=0}={}) {
+    if(!this.useVectors) throw new Error("Vectors are not enabled");
+    cname ||= vectorMatch.constructor.name!=="Object" ? vectorMatch.constructor.name : undefined;
+    let i = 0;
+    const start = cname ? cname + "@" : "",
+        masterVector = this.getVector(vectorMatch,cname),
+        toYield = [];
+    for(let {key,value} of this.vectors.getRange({start})) {
+        if(start && !key.startsWith(start)) break;
+        let vector = [...masterVector]
+        for(let i=0;i<vector.length;) {
+            if(vector[i]===null) {
+                vector.splice(i,1);
+                value.splice(i,1);
+            } else {
+                i++
+            }
+        }
+        for(let i=0;i<value.length;) {
+            if(value[i]===null) {
+                value.splice(i,1);
+                vector.splice(i,1);
+            } else {
+                i++
+            }
+        }
+        const d = distance(vector,value);
+        if(d>maxDistance) continue;
+        const entry = this.getEntry(key, {versions: true});
+        if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined))) {
+            entry.distance = d;
+            if (offset <= 0) {
+                i++;
+                if(select) {
+                    entry.value = selector(entry.value,select);
+                }
+                if(sort) {
+                    toYield.push(entry);
+                } else {
+                    yield entry;
+                }
+            } else {
+                offset--;
+            }
+            if (i >= limit) return;
+        }
+    }
+    if(sort) {
+        for(const item of toYield.sort((a,b) => a.distance-b.distance)) {
+            yield item;
+        }
+    }
+ }
+
 const functionalOperators = Object.entries(operators).reduce((operators,[key,f]) => {
     operators[key] = function(test) {
         let join;
@@ -701,13 +926,16 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
 },{});
 
 const withExtensions = (db,extensions={}) => {
-    db.data = db.openDB(`${db.name}.data`); //,{dupSort:true,encoding:"ordered-binary"}
-    db.data.valueIndex = db.openDB(`${db.name}.valueIndex`); //,{dupSort:true,encoding:"ordered-binary"}
-    db.data.propertyIndex = db.openDB(`${db.name}.propertyIndex`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data = db.openDB(`${db.name}.data`);
+    db.data.valueIndex = db.openDB(`${db.name}.valueIndex`);
+    db.data.propertyIndex = db.openDB(`${db.name}.propertyIndex`);
+    if(db.useVectors) db.data.vectors = db.openDB(`${db.name}.vectors`);
+    db.data.schemata = db.openDB(`${db.name}.schemata`);
     //db.valueIndex = db.propertyIndex;
     /* index, indexSync */
     db.data.indexOptions = db.indexOptions;
-    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index,move,patch,put,putSync,remove,removeSync,...extensions})
+    db.data.useVectors = db.useVectors;
+    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,euclidianDistance,get,getRangeFromIndex,getRangeFromVector,getSchema,getVector,index,learnSchema,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
 export {DONE,ANY,functionalOperators as operators,withExtensions}

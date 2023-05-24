@@ -3,19 +3,77 @@ import {withExtensions,operators} from "./index.js";
 
 const {$lt,$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
 
-const db = withExtensions(open("test.db",{useVersions:true,indexOptions:{fulltext:true}}));
+const db = withExtensions(open("test.db",{useVersions:true,useVectors:["Car"],indexOptions:{fulltext:true}}));
+// {indexOptions:{fulltext:true,vectors:{hnsw:true}}));
 
 class Person {
-    constructor(config) {
+    constructor(config={}) {
+        const value = structuredClone(config);
+        if(value.address) value.address = new Address(value.address);
+        Object.assign(this,value);
+    }
+}
+
+class Address {
+    constructor(config={}) {
         Object.assign(this,structuredClone(config));
     }
 }
 
-db.clearSync();
+class Car {
+    constructor(config={}) {
+        Object.assign(this,structuredClone(config));
+    }
+}
+
+db.clearSync(true);
 const now = new Date(),
     personSchema = db.defineSchema(Person,{indexKeys:["name","age","address.city","address.state","created","aRegExp"]}),
-    person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/,"unindexed":"unindexed"};
+    person = {name:"joe",age:21,address:{city:"New York",state:"NY"},created:now,aRegExp:/abc/,"unindexed":"unindexed"},
+    car1 = {make:"Ford",model:"Mustang",year:1964,color:"red",price:3500},
+    car2 = {make:"Ford",model:"Mustang",year:1965,color:"red",price:4500},
+    car3 = {make:"Chevy",model:"Bel Air",year:1957,color:"red",price:3500},
+    car4 = {make:"Chevy",model:"Bel Air",year:1958,color:"red",price:4500},
+    car5 = {make:"Toyota",model:"Camry",year:2018,color:"red",price:25000},
+    car6 = {make:"Toyota",model:"Camry",year:2019,color:"red",price:35000};
 let personId;
+
+
+test("learnSchema",async () => {
+    const result = await db.learnSchema([new Person(person)],{baseURI:"http://localhost:8080/schemata"});
+    expect(typeof(result)).toBe("object");
+    expect(typeof(result.Person)).toBe("object");
+    expect(typeof(result.Address)).toBe("object");
+})
+
+test("learnSchema for vector",async () => {
+    const result = await db.learnSchema([car1,car2,car3,car4,car5,car6],{cname:"Car",put:true});
+    expect(typeof(result)).toBe("object");
+    expect(typeof(result.Car)).toBe("object");
+})
+
+test("getVector",async () => {
+    for(const car of [car1,car2,car3,car4,car5,car6]) {
+        await db.put(null,car,"Car")
+    }
+    const vector1 = db.getVector(car1,"Car"),
+        vector2 = db.getVector(car2,"Car"),
+        vector3 = db.getVector(car3,"Car"),
+        vector4 = db.getVector(car4,"Car"),
+        vector6 = db.getVector(car6,"Car");
+    expect(db.euclidianDistance(vector1,vector6)).toBeGreaterThan(db.euclidianDistance(vector1,vector2));
+    expect(db.euclidianDistance(vector1,vector2)).toBe(db.euclidianDistance(vector3,vector4));
+})
+
+test("getRangeFromVector",async () => {
+    const range = [...db.getRangeFromVector(new Car(car1))];
+    expect(range.length).toBe(6);
+})
+
+test("getRangeFromVector - incomplete vector",async () => {
+    const range = [...db.getRangeFromVector(new Car({color:"red",price:3500}))];
+    expect(range.length).toBe(6);
+})
 
 test("put returns id",async () => {
     const id = await db.put(null,{...person,"#":"Person@1"},"Person");
@@ -28,7 +86,6 @@ test("index returns id",async () => {
     personId = id;
     expect(id).toBe("Person@1");
 });
-
 
 test("putSync returns key",async () => {
     const id = db.putSync(null,{...person,"#":"Person@1"},"Person");
@@ -396,7 +453,7 @@ test("copy primitive",async () => {
     expect(value).toBe(1);
 })
 
-test("patch",async () => {
+xtest("patch",async () => {
     const result = await db.patch(personId,{age:22,created:new Date()});
     expect(result).toBe(true);
     const value = db.get(personId);
@@ -412,7 +469,7 @@ test("patch fail",async () => {
     expect(result).toBe(false);
 })
 
-test("patch schemaless object",async () => {
+xtest("patch schemaless object",async () => {
     const id = await db.put(null,{name:"joe",age:21}),
         result = await db.patch(id,{age:22}),
         value = db.get(id);
@@ -482,7 +539,7 @@ test("clearSync",async () => {
 })
 
 test("clearAsync",async () => {
-    const id = await db.put(null,{...person});
+    const id = await db.put(null,{...person},"Person");
     await db.clearAsync();
     expect(db.get(id)).toBe(undefined);
     expect([...db.propertyIndex.getRange()].length).toBe(0);

@@ -2,6 +2,7 @@
 
 - object indexing for LMDB,
 - index based queries using literals, functions, and regular expressions,
+- inclusive or, full text index, and vector based similarity search,
 - over 50 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
 - automatic id generation,
 - instantiation of returned objects as instances of their original classes,
@@ -103,7 +104,7 @@ Returns the schema for the class of the object or `undefined`.
 
 If `create` is `true` and `value` is an object and no schema exists, a schema is created and returned.
 
-#### async db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?fulltext:boolean|number,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns AsyncIterableIterator
+#### *db.getRangeFromIndex(indexMatch:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?fulltext:boolean|number,?minScore:number,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns IterableIterator of Entry
 
 Yields objects of the form `{key,value,count,version}` where `key` is the key of the object, `value` is the object in the database, `count` is the number of index matches, `version` is the version number and is only present if the database was opened using versioning.
 
@@ -180,6 +181,15 @@ Note: When `{indexOptions:{fulltext:true}}` is set, passing functions as propert
 
 If `sort` is `true` entries are returned based on how many index matches occurred, with the highest first. If `sort` is a function, then entries are returned in the order determined by the function. Note, both of these are expensive since they require resolving all matches first.
 
+#### *db.getRangeFromVector(vector:object,?valueMatch:function|object,?select:function|object,{?cname:string,?scan:boolean,?sortable:boolean,?maxDistance:number,?sort:boolean|function,?versions:boolean,?offset:number,limit=||Infinity}=?options={}) - returns IterableIterator of Entry
+
+Works the same as `getRangeFromIndex` above, except that the `vector` is used to select the items and a slightlu different object is returned.
+
+`vector` is not an array, it is an object from which a vector array is automatically generated base on a schema definition. The schema can be automatically infered using `db.inferSchmea`.
+
+Yields objects of the form `{key,value,distance,version}` where `key` is the key of the object, `value` is the object in the database, `distance` is the distance from the selection vector, `version` is the version number and is only present if the database was opened using versioning.
+
+See `Vector Based Search` below for more information.
 
 #### async db.move(key:lmdbKey,destKey:lmdbKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey|undefined
 
@@ -230,6 +240,40 @@ Synchronous version of `db.remove`.
 Extends an LMDB database and any child databases it opens to have the `extensions` provided as well as any child databases it opens. This utility is common to other `lmdb` extensions like `lmdb-patch`, `lmdb-copy`, `lmdb-move`.
 
 Returns a child database that has the extensions `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `clearAsync`, clearSync`, `put`, `putSync`,`remove` and `removeSync`.
+
+## Approximate Match Searches
+
+`lmdb-index` offers three mechanisms for searching data for approximate or partial matches.
+
+1. Partial matches against full text indexes
+2. Partial matches using the `$ior` operator that increments a count for each portio of the or that is matched
+3. Partial matches using vector space representations
+
+The first two approaches can be accomplished using `db.getRangeFromIndex`. The third approach can be accomplished using `db.getRangeFromVector`
+
+### Full Text Indexing
+
+When a database is opened with `{indexOptions:{fulltext:boolean|array}}`, all string values associated with objects and properties enabled for full text search are tokenized and stop words, e.g. `and`, `or`, `but`, are removed.
+
+All objects are enabled for full text search by providing `true` as the value for `fulltext`; otherwise, all classes with constructors identified an array are indexed.
+
+The identification of classes can be done by providing their class/constructor or a string name.
+
+When fulltext indexing is enabled, the number of index entries increases at a minimum to the number of unique tokens and many more possible objects match each entry.
+
+See `db.getRangeFromIndex` for more detail
+
+### Vector Based Search
+
+Vector based search is a technique for finding the closest matches to a vector in a multi-dimensional space. It is often used in machine learning and artificial intelligence, but can also be used for simple approximate matching.
+
+Traditional JavaScript objects can be turned into vectors by:
+
+1. Flattening their structure while turning properties and values into numbers
+2. String values can be represented as their 1 based offset into arrays of all possible values / number of possible values
+3. Numeric values can be represented a (value - min of all possible values) / maximum of all possible values
+4. Boolean values can be converted into .5 and 1.
+5. Dates can be converted into their numeric value in milliseconds and treated as numbers
 
 ## Operators
 
