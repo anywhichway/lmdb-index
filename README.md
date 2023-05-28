@@ -1,8 +1,9 @@
 # lmdb-index
 
 - object indexing for LMDB,
+- schema free or JSON schema based with automatic schema inference
 - index based queries using literals, functions, and regular expressions,
-- inclusive or, full text index, and vector based similarity search,
+- inclusive or, full text index, and vector based approximate/similarity search,
 - over 50 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
 - automatic id generation,
 - instantiation of returned objects as instances of their original classes,
@@ -11,12 +12,6 @@
 
 This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
-This is BETA software. The API is stable and unit test coverage exceeds 99%.
-
-From an internal development perspective, v0.11.3 is the final BETA release. We will hold a few weeks for external feedback and then push v1.0.0. The first feature to be added after v1.0.0 will be vector support and similarity search
-
-A few stars on [GitHub](https://github.com/anywhichway/lmdb-index) or [documentation issues](https://github.com/anywhichway/lmdb-index/issues) would provide a little comfort regarding a v1.0.0 release :-).
-
 # Installation
 
 ```bash
@@ -24,6 +19,8 @@ npm install lmdb-index --save
 ```
 
 # Usage
+
+## Traditional and Full Text Search
 
 ```javascript
 import {open} from "lmdb";
@@ -64,7 +61,14 @@ if(id) {
     },null,{fulltext:true});
 }
 ```
-## API
+
+## Inclusive Or Search
+
+
+## Vector Based Search
+
+
+# API
 
 #### async db.copy(key:LMDBKey,?destKey:LMDBKey,?overwrite:boolean,?version:number,?ifVersion:number) - returns LMDBKey
 
@@ -75,7 +79,7 @@ If `key` refers to an object for which there is a schema:
 - The copy is inserted and indexed inside a transaction
 - The `destKey` is returned if the transaction succeeds, otherwise `undefined` is returned.
 
-If `key` points to a primitive:
+If `key` points to a primitive or an object without a schema:
 - If `destKey` is nullish, it given a UUIDv4 value
 - The copy is inserted at the `destKey` (No indexes are updated because primitives are not indexed.)
 - The `destKey` is returned if the insertion succeeds, otherwise `undefined` is returned.
@@ -207,7 +211,7 @@ Also see [lmdb-patch](https://github.com/anywhichway/lmdb-patch)
 
 Works similar to [lmdb put](https://github.com/kriszyp/lmdb-js#dbputkey-value-version-number-ifversion-number-promiseboolean)
 
-When putting an object for indexing, the `key` should be `null`. It is retrieved from the object using the `idKey` of the schema. If there is a mismatch between the `key` and the `idKey` of the object, an Error will be thrown.
+When putting an object for indexing, the `key` should be `null`. It is retrieved from the object using the `idKey` of the object's schema, if any.
 
 If `value` is an object and `key` is `null`, it will be indexed by the keys of the object so long as it is an instance of an object controlled by a schema declared with `defineSchema`. To index all top level keys on all objects, call `db.defineSchema(Object)`. If `key` is `null`, a unique id will be generated and added to the object. See [defineSchema](#async-defineschemaclassconstructor-options) for more information.
 
@@ -369,6 +373,9 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 * The major version will be zero.
 * Breaking changes or feature additions will increment the minor version.
 * Bug fixes and documentation changes will increment the patch version.
+
+
+2023-06-08 v1.1.0 Enhanced documentation. Added vector and $ior search. Improved search scoring.  Added unit tests.
 
 2023-05-22 v0.11.3 Enhanced documentation. Added unit tests. Resolved the underlying issue related to `db.index`, it will no longer be deprecated.
 

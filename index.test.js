@@ -1,7 +1,7 @@
 import {open} from "lmdb";
 import {withExtensions,operators} from "./index.js";
 
-const {$lt,$gt,$gte,$eq,$neq,$and,$or,$not} = operators;
+const {$lt,$lte,$eq,$neq,$gt,$gte,$and,$or,$ior,$not} = operators;
 
 const db = withExtensions(open("test.db",{useVersions:true,useVectors:["Car"],indexOptions:{fulltext:true}}));
 // {indexOptions:{fulltext:true,vectors:{hnsw:true}}));
@@ -74,6 +74,19 @@ test("getRangeFromVector - incomplete vector",async () => {
     const range = [...db.getRangeFromVector(new Car({color:"red",price:3500}))];
     expect(range.length).toBe(6);
 })
+
+test("getRangeFromIndex - $ior",async () => {
+    const range = [...db.getRangeFromIndex({make:"Ford",price:$ior(3500,4500)})];
+    expect(range.length).toBe(2);
+    expect(range[0].count).toBe(2);
+})
+
+test("getRangeFromIndex - $ior complex",async () => {
+    const range = [...db.getRangeFromIndex({make:"Ford",price:$ior($gte(3500),$lte(4500))})];
+    expect(range.length).toBe(2);
+    expect(range[0].count).toBe(3);
+})
+
 
 test("put returns id",async () => {
     const id = await db.put(null,{...person,"#":"Person@1"},"Person");

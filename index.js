@@ -446,6 +446,45 @@ function euclidianDistance(a, b) {
         ** (1/2)
 }
 
+function manhattanDistance(a, b) {
+    return a.map((x, i) => Math.abs( x - b[i] )) // absolute value of the difference
+        .reduce((sum, now) => sum + now) // sum
+}
+
+function cosineSimilarity(a, b) {
+    const dotProduct = a.map((x, i) => x * b[i]) // multiply each value
+        .reduce((sum, now) => sum + now) // sum
+    const aMagnitude = a.map(x => x ** 2) // square each value
+            .reduce((sum, now) => sum + now) // sum
+        ** (1/2)
+    const bMagnitude = b.map(x => x ** 2) // square each value
+            .reduce((sum, now) => sum + now) // sum
+        ** (1/2)
+    return dotProduct / (aMagnitude * bMagnitude)
+}
+
+function jaccardSimilarity(a, b) {
+    const intersection = a.filter(x => b.includes(x))
+    const union = [...new Set([...a, ...b])]
+    return intersection.length / union.length
+}
+
+function diceSimilarity(a, b) {
+    const intersection = a.filter(x => b.includes(x))
+    return 2 * intersection.length / (a.length + b.length)
+}
+
+function getSimilarity(a,b) {
+    if(a.length!==b.length) return;
+    if(a.length===0) return 1;
+    if(a.length===1) return a[0]===b[0] ? 1 : 0;
+    if(a.length===2) return diceSimilarity(a,b);
+    if(a.length===3) return jaccardSimilarity(a,b);
+    if(a.length===4) return cosineSimilarity(a,b);
+    if(a.length===5) return manhattanDistance(a,b);
+    return euclidianDistance(a,b);
+}
+
 function getVector(value,cname) {
     const schema = this.getSchema(cname||value);
     if(!schema.vectorKeys) return;
@@ -557,7 +596,9 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
         matches = new Map(),
         schema = this.getSchema(cname),
         keys = getKeys.call(this,serializeSpecial({keepRegExp:true})(null,pattern),schema?.indexKeys);
-    let i = 0;
+    let possible = 0,
+        possibleCount = keys.length,
+        i = 0;
     if(keys.length===0 && scan) {
         const start = [cname+"@"];
         //try {
@@ -603,8 +644,9 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
             index = this.propertyIndex;
         }
         for (const item of index[method](arg)) {
+            let count = method=== "getRange" ? 0 : 1;
             const id = method === "getValues" ? item : item.key[item.key.length-1]; // id is value when using getRange since getRange is accessing index
-            if (cname && !id.startsWith(cname+"@")) {
+            if (cname && !id.startsWith(cname+"@") || yielded.has(id)) {
                 continue;
             }
             if (method === "getRange") {
@@ -616,7 +658,12 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
                     if(part && typeof(part)==="object") {
                         const key = item.key[i];
                         if(part instanceof RegExp) {
-                            return part.test(key) ? false : wasRegExp = true;
+                            possibleCount++;
+                            if(part.test(key)) {
+                                count++;
+                                return false;
+                            }
+                            return wasRegExp = true;
                         }
                     } else if(part!==item.key[i]) {
                         return true;
@@ -627,34 +674,44 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
                 }
                 let toTest = index===this.valueIndex ? item.key[0] : item.key[item.key.length - 2];
                 if (type === "function") {
-                    if(!(typeof(toTest)=="string" && fulltext) && [undefined,DONE].includes(value(toTest))) break;
+                    const result = value(toTest);
+                    if(!(typeof(toTest)=="string" && fulltext) && [undefined,DONE].includes(result)) break;
+                    count += value.count||1;
+                    possibleCount += (value.possibleCount||1)-1;
                 } else if (value && type === "object") {
                     if(value instanceof RegExp) {
                         if(!value.test(toTest)) {
                             continue;
                         }
+                        count += 1;
                     }
                     // objects always match indexes, resolved at value test
-                } else if (toTest !== value) {
-                    continue;
+                } else {
+                    if (toTest !== value) continue;
+                    count += 1;
                 }
             }
-            const count = method=== "getRange" ? item.value : 1;
             if (i === 0) {
-                if(keys.length===1 && !yielded.has(id) && 1>=minScore) {
-                    yielded.add(id);
-                    yield {id,count};
+                if(count>0) {
+                    const score = count/possibleCount;
+                    if(keys.length===1 && !yielded.has(id) && score>=minScore) {
+                        yielded.add(id);
+                        yield {id,count,score};
+                    }
+                    matches.set(id, count);
+                    possible ||= possibleCount;
                 }
-                matches.set(id, count);
             } else {
-                let count = matches.get(id);
+                count = count + matches.get(id);
                 if (count >= 1) {
-                    count++;
-                    if(i===keys.length-1 && count>=minScore) {
-                        if(!yielded.has(id)) {
-                            yielded.add(id);
+                    if(i===keys.length-1) {
+                        const score = count/possible;
+                        if(score>=minScore) {
+                            if(!yielded.has(id)) {
+                                yielded.add(id);
+                            }
+                            yield {id,count,score};
                         }
-                        yield {id,count};
                     } else {
                         matches.set(id,count);
                     }
@@ -665,9 +722,10 @@ function *matchIndex(pattern,{cname,minScore,sortable,fulltext,scan}={}) {
             for(const [id,count] of matches) {
                 if(count<=i) {
                     matches.delete(id);
-                    if(sortable && !yielded.has(id) && count>=minScore) {
+                    const score = count/possible;
+                    if(sortable && !yielded.has(id) && score>=minScore) {
                         yielded.add(id);
-                        yield {id,count}
+                        yield {id,count,score}
                     }
                 }
             }
@@ -788,12 +846,10 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
             if(fulltext===true) {
                 minScore = 0;
             } else {
-                if(typeof(fulltext)==="number" && fulltext>=0 && fulltext<=1) {
-                    const keys = getKeys.call(this,serializeSpecial()(indexMatch));
-                    minScore = keys.length * fulltext;
-                } else {
+                if(typeof(fulltext)!=="number" || fulltext<0 || fulltext>1) {
                     throw new TypeError(`fulltext must be a number between 0 and 1, or true, not ${fulltext}`);
                 }
+                minScore = fulltext;
             }
         } else {
             minScore = 0;
@@ -807,7 +863,7 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
         const matches = [...matchIndex.call(this,indexMatch,{cname,scan,minScore,sortable:sortable||fulltext,fulltext})],
             items = sortable ? matches.sort(typeof(sort)==="function" ? sort : (a, b) => b.count - a.count) : matches;
         // entries are [id,count], sort descending by count
-        for (const {id, count} of items) {
+        for (const {id, count,score} of items) {
             const entry = this.getEntry(id, {versions: true});
                 //value = entry ? deserializeSpecial(null,entry.value) : undefined;
             if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined))) {
@@ -816,6 +872,8 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
                     if(select) {
                         entry.value = selector(entry.value,select);
                     }
+                    entry.count = count;
+                    entry.score = score;
                     yield entry;
                 } else {
                     offset--;
@@ -824,7 +882,7 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
             }
         }
     } else {
-        for(const {id} of matchIndex.call(this,indexMatch,{cname,scan,minScore})) {
+        for(const {id,count,score} of matchIndex.call(this,indexMatch,{cname,scan,minScore})) {
             const entry = this.getEntry(id, {versions: true});
             if (entry && (!valueMatch || valueMatch === entry.value || typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined)) {
                 if (offset <= 0) {
@@ -832,6 +890,8 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
                     if(select) {
                         entry.value = selector(entry.value,select);
                     }
+                    entry.count = count;
+                    entry.score = score;
                     yield entry;
                 } else {
                     offset--;
@@ -851,21 +911,12 @@ function *getRangeFromVector(vectorMatch,valueMatch,select,{cname,distance=eucli
         toYield = [];
     for(let {key,value} of this.vectors.getRange({start})) {
         if(start && !key.startsWith(start)) break;
-        let vector = [...masterVector]
-        for(let i=0;i<vector.length;) {
-            if(vector[i]===null) {
-                vector.splice(i,1);
-                value.splice(i,1);
-            } else {
-                i++
-            }
-        }
-        for(let i=0;i<value.length;) {
-            if(value[i]===null) {
-                value.splice(i,1);
-                vector.splice(i,1);
-            } else {
-                i++
+        let vector = [...masterVector];
+        for(let i=0;i<Math.max(vector.length,value.length);i++) {
+            if (vector[i] == null || value[i]== null) {
+                i >= vector.length || vector.splice(i, 1);
+                i >= value.length || value.splice(i, 1);
+                i--;
             }
         }
         const d = distance(vector,value);
@@ -906,19 +957,62 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
     }
     operators.$and = (...tests) => {
         const op = (left,right) => {
-            return tests.every((test) => test(left,right));
+            op.count = 0;
+            op.possibleCount = tests.length;
+            for(const test of tests) {
+                const result = typeof(test)==="function" ? test(left,right) : (test===left ? test : undefined);
+                if(result==undefined) {
+                    op.count = 0;
+                    break;
+                }
+                op.count += test ? test.count||1 : 1;
+            }
+            return op.count > 0 ? true : undefined;
         }
         return op;
     }
     operators.$or = (...tests) => {
         const op = (left,right) => {
-            return tests.some((test) => test(left,right));
+            op.count = 0;
+            op.possibleCount = 1;
+            for(const test of tests) {
+                const result = typeof(test)==="function" ? test(left,right) : (test===left ? test : undefined);
+                if(result!==undefined) {
+                    op.count += test ? test.count||1 : 1;
+                    break;
+                }
+            }
+            return op.count > 0 ? true : undefined;
         }
         return op;
     }
-    operators.$not = (test) => {
+    operators.$ior = (...tests) => {
         const op = (left,right) => {
-            return !test(left,right);
+            op.count = 0;
+            op.possibleCount = tests.length;
+            for(const test of tests) {
+                const result = typeof(test)==="function" ? test(left,right) : (test===left ? test : undefined);
+                if(result!==undefined) {
+                    op.count += test ? test.count||1 : 1;
+                }
+            }
+            return op.count > 0 ? true : undefined;
+        }
+        return op;
+    }
+    operators.$not = (...tests) => {
+        const op = (left,right) => {
+            op.count = 0;
+            op.possibleCount = tests.length;
+            for(const test of tests) {
+                const result = typeof(test)==="function" ? test(left,right) : (test===left ? test : undefined);
+                if(result!==undefined) {
+                    op.count = 0;
+                    break;
+                }
+                op.count += test ? test.count||1 : 1;
+            }
+            return op.count > 0 ? true : undefined;
         }
         return op;
     }
