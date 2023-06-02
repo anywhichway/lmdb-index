@@ -17,24 +17,8 @@ import {copy as lmdbCopy} from "lmdb-copy";
 import {move as lmdbMove} from "lmdb-move";
 import {patch as lmdbPatch} from "lmdb-patch";
 import {v4 as uuid} from "uuid";
-import {operators} from "./src/operators.js";
+import {operators,STOPWORDS,tokenize} from "./src/operators.js";
 import deepEqual from "fast-deep-equal";
-
-var STOPWORDS = [
-    'a', 'about', 'after', 'ala', 'all', 'also', 'am', 'an', 'and', 'another', 'any', 'are',
-    'around','as', 'at', 'be',
-    'because', 'been', 'before', 'being', 'between', 'both', 'but', 'by', 'came', 'can',
-    'come', 'could', 'did', 'do', 'each', 'for', 'from', 'get', 'got', 'has', 'had',
-    'he', 'have', 'her', 'here', 'him', 'himself', 'his', 'how', 'i', 'if', 'iff', 'in',
-    'include', 'into',
-    'is', 'it', 'like', 'make', 'many', 'me', 'might', 'more', 'most', 'much', 'must',
-    'my', 'never', 'now', 'of', 'on', 'only', 'or', 'other', 'our', 'out', 'over',
-    'said', 'same', 'see', 'should', 'since', 'some', 'still', 'such', 'take', 'than',
-    'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
-    'through', 'to', 'too', 'under', 'up', 'very', 'was', 'way', 'we', 'well', 'were',
-    'what', 'where', 'which', 'while', 'who', 'with', 'would', 'you', 'your'];
-
-const tokenize = (value,isObject) => (value.replace(new RegExp(`[^A-Za-z0-9\\s${isObject ? "\:" : ""}]`,"g"),"").replace(/  +/g," ").toLowerCase().split(" "));
 
 function defineSchema(ctor,options={}) {
     // {indexKeys:["name","age"],name:"Person",idKey:"#"}
@@ -74,11 +58,12 @@ async function copy(key,destKey,overwrite,version,ifVersion) {
 }
 
 function get(get,key) {
-    const value = deserializeSpecial(null,get.call(this,key));
+    const value = deserializeSpecial(null,structuredClone(get.call(this,key)));
     if(value && typeof(value)==="object") {
         const cname = key.split("@")[0],
             schema = getSchema.call(this,cname);
-        return schema ? schema.create(value) : value;
+        value[schema?.idKey||"#"] ||= key;
+        return schema && !(value instanceof schema.ctor) ? schema.create(value) : value;
     }
     return value;
 }
@@ -107,14 +92,14 @@ async function patch(key,patch,version,ifVersion) {
     if(schema) {
         return this.childTransaction(async () => {
             patch = serializeSpecial()(patch);
-            if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) {
-                return false;
-            }
             const id = key,
                 patchKeys = getKeys.call(this,patch,schema.indexKeys),
                 entryKeys = getKeys.call(this,serializeSpecial()(entry.value),schema.indexKeys),
                 keysToRemove = entryKeys.filter((ekey)=> patchKeys.some((pkey) => pkey.length==ekey.length && pkey.every((item,i)=> i==pkey.length-1 || item===ekey[i]))),
                 keysToAdd = patchKeys.filter((pkey)=> entryKeys.some((ekey) => ekey.length==pkey.length && ekey.every((item,i)=> i==ekey.length-1 ? item!==pkey[i] : item===pkey[i])));
+            if(!await lmdbPatch.call(this,key,patch,version,ifVersion)) { // must be done after key collection above
+                return false;
+            }
             for(const key of keysToRemove) {
                 await this.propertyIndex.remove([...key, id]);
                 await this.valueIndex.remove([key.pop(),...key,id]);
@@ -127,10 +112,13 @@ async function patch(key,patch,version,ifVersion) {
                 await this.propertyIndex.put(propertyKey,propertyCount+1);
                 await this.valueIndex.put(valueKey,valueCount+1);
             }
+            Object.assign(entry.value,patch); // depends on cache:true setting for database, must be done after updates above
             return true;
         });
+    } else if(lmdbPatch.call(this,key,patch,version,ifVersion)) {
+        Object.assign(entry.value,patch); // depends on cache:true setting for database
+        return true;
     }
-    return lmdbPatch.call(this,key,patch,version,ifVersion);
 }
 
 function put(put,key,value,cname,...args) { // do not declare this as async, it will break lmdb internals
@@ -140,6 +128,9 @@ function put(put,key,value,cname,...args) { // do not declare this as async, it 
         hasCname = !!cname;
     cname ||= schema ? schema.ctor.name : value.constructor.name;
     const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : (value && typeof(value)==="object" ? (value["#"] ||= key || `${cname}@${uuid()}`) : undefined);
+    if(schema && !(value instanceof schema.ctor)) {
+        value = schema.create(value);
+    }
     if(key==null || id!==undefined) {
             if(id && key && id!==key) {
                 throw new Error(`id ${id} does not match key ${key}`);
@@ -175,6 +166,9 @@ function putSync(putSync,key,value,cname,...args) {
         hasCname = !!cname;
     cname ||= schema ? schema.ctor.name : value.constructor.name;
     const id = schema ? (value[schema.idKey] ||= `${cname}@${uuid()}`) : value && type==="object" ? (value["#"] ||= key || `${cname}@${uuid()}`) : undefined;
+    if(schema && !(value instanceof schema.ctor)) {
+        value = schema.create(value);
+    }
     if(key==null || id!==undefined) {
         if(id && key && id!==key) {
             throw new Error(`id ${id} does not match key ${key}`);
@@ -637,8 +631,16 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
             items = sortable ? matches.sort(typeof(sort)==="function" ? sort : (a, b) => b.count - a.count) : matches;
         // entries are [id,count], sort descending by count
         for (const {id, count} of items) {
-            const entry = this.getEntry(id, {versions: true}),
-                value = deserializeSpecial(null,entry.value);
+            let entry = this.getEntry(id, {versions: true});
+            if(entry) {
+                entry = {...entry};
+                entry.key = id;
+                const schema = this.getSchema(id.split("@")[0]);
+                entry.value = deserializeSpecial(null,structuredClone(entry.value));
+                if(schema) {
+                    entry.value = schema.create(entry.value);
+                }
+            }
             if (entry && (!valueMatch || valueMatch === entry.value || (typeof (valueMatch) === "object" ? matchValue(valueMatch, value) !== undefined : valueMatch(value) !== undefined))) {
                 if (offset <= 0) {
                     i++;
@@ -654,7 +656,16 @@ function *getRangeFromIndex(indexMatch,valueMatch,select,{cname,fulltext,scan,so
         }
     } else {
         for(const {id} of matchIndex.call(this,indexMatch,{cname,scan,minScore})) {
-            const entry = this.getEntry(id, {versions: true});
+            let entry = this.getEntry(id, {versions: true});
+            if(entry) {
+                entry = {...entry};
+                entry.key = id;
+                const schema = this.getSchema(id.split("@")[0]);
+                entry.value = deserializeSpecial(null,structuredClone(entry.value));
+                if(schema) {
+                    entry.value = schema.create(entry.value);
+                }
+            }
             if (entry && (!valueMatch || valueMatch === entry.value || typeof (valueMatch) === "object" ? matchValue(valueMatch, entry.value) !== undefined : valueMatch(entry.value) !== undefined)) {
                 if (offset <= 0) {
                     i++;
@@ -701,13 +712,13 @@ const functionalOperators = Object.entries(operators).reduce((operators,[key,f])
 },{});
 
 const withExtensions = (db,extensions={}) => {
-    db.data = db.openDB(`${db.name}.data`); //,{dupSort:true,encoding:"ordered-binary"}
-    db.data.valueIndex = db.openDB(`${db.name}.valueIndex`); //,{dupSort:true,encoding:"ordered-binary"}
-    db.data.propertyIndex = db.openDB(`${db.name}.propertyIndex`); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data = db.openDB(`${db.name}.data`,{cache:true,useVersions:db.useVersions}); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data.valueIndex = db.openDB(`${db.name}.valueIndex`,{cache:true}); //,{dupSort:true,encoding:"ordered-binary"}
+    db.data.propertyIndex = db.openDB(`${db.name}.propertyIndex`,{cache:true}); //,{dupSort:true,encoding:"ordered-binary"}
     //db.valueIndex = db.propertyIndex;
     /* index, indexSync */
     db.data.indexOptions = db.indexOptions;
-    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index,move,patch,put,putSync,remove,removeSync,...extensions})
+    return lmdbExtend(db.data,{clearAsync,clearSync,copy,defineSchema,get,getRangeFromIndex,getSchema,index,indexSync,move,patch,put,putSync,remove,removeSync,...extensions})
 }
 
-export {DONE,ANY,functionalOperators as operators,withExtensions}
+export {DONE,ANY,selector,functionalOperators as operators,withExtensions}

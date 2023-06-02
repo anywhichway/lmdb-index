@@ -1,4 +1,4 @@
-import {operators,DONE} from './operators.js';
+import {operators,DONE,cosineDistance,manhattanDistance,jaccardDistance,euclidianDistance,levenshteinDistance,colorDistance} from './operators.js';
 
 test("$type",() => {
     expect(operators.$type("hello",{test:"string"})).toBe("hello");
@@ -141,6 +141,82 @@ test("$echoes",() => {
     expect(operators.$echoes("one hundred", {test: 100})).toBe("one hundred");
     expect(operators.$echoes(100, {test: "one hundred"})).toBe(100);
 })
+
+test("$distance",() => {
+expect(operators.$distance("lyme", {test: ["lime",.25]})).toBeLessThanOrEqual(.75);
+expect(operators.$distance(["lime",.25], {test: "lyme" })).toBeLessThanOrEqual(.75);
+expect(operators.$distance("lyme", {test: ["lime",1]})).toBeLessThanOrEqual(1);
+expect(operators.$distance("lyme", {test: ["lime",2]})).toBeLessThanOrEqual(2);
+expect(operators.$distance("letter", {test: ["lime",2]})).toBe(undefined);
+})
+
+test("$distance cosine",() => {
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Elon Musk's Boring Co to build high-speed airport link in Chicago",.01,{method:cosineDistance}]})).toBeLessThanOrEqual(.01);
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Elon Musk's Boring Company to build high-speed Chicago airport link",.15,{method:cosineDistance}]})).toBeLessThanOrEqual(.15);
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Both apple and orange are fruit",.01,{method:cosineDistance}]})).toBe(undefined);
+})
+
+test("$distance cosine - type throws",() => {
+    try {
+        operators.$distance("a string", {test: [[1,2,3],.01,{method:cosineDistance}]},true);
+    } catch(e) {
+        return;
+    }
+    throw new Error("expected error")
+ })
+
+test("$distance cosine - throws on not array",() => {
+    try {
+        operators.$distance(1, {test: [1,.01,{method:cosineDistance}]},true)
+    } catch(e) {
+        return;
+    }
+    throw new Error("expected error")
+})
+
+test("$distance cosine - null throws",() => {
+    try {
+        operators.$distance("a string", {test: [null,.01,{method:cosineDistance}]},true);
+    } catch(e) {
+        return;
+    }
+    throw new Error("expected error")
+})
+
+test("$distance manhattan",() => {
+    expect(operators.$distance("a short string", {test: ["a short string",.01,{method:manhattanDistance}]})).toBe(0);
+})
+
+test("$distance jaccard",() => {
+    expect(operators.$distance("a short string", {test: ["a short string",.01,{method:jaccardDistance}]})).toBe(0);
+})
+
+test("$distance jaccard - throws on not array",() => {
+    try {
+        operators.$distance(1, {test: ["a short string",.01,{method:jaccardDistance}]},true)
+    } catch(e) {
+        return;
+    }
+    throw new Error("expected error")
+})
+
+test("$distance euclidean",() => {
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Elon Musk's Boring Co to build high-speed airport link in Chicago",.01,{method:euclidianDistance}]})).toBeLessThanOrEqual(.01);
+    //expect(operators.$distance("lyme", {test: ["lime",1]})).toBe("lyme");
+    //expect(operators.$distance("lyme", {test: ["lime",2]})).toBe("lyme");
+    //expect(operators.$distance("letter", {test: ["lime",2]})).toBe(undefined);
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Elon Musk's Boring Company to build high-speed Chicago airport link",.15,{method:euclidianDistance}]})).toBeLessThanOrEqual(.15);
+    expect(operators.$distance("Elon Musk's Boring Co to build high-speed airport link in Chicago", {test: ["Both apple and orange are fruit",.01,{method:euclidianDistance}]})).toBe(undefined);
+})
+
+test("$distance color",() => {
+    expect(operators.$distance("blue", {test: ["blue",.01,{method:colorDistance}]})).toBeLessThanOrEqual(.01);
+    expect(operators.$distance("blue", {test: ["#0000FF",.01,{method:colorDistance}]})).toBeLessThanOrEqual(.01);
+    expect(operators.$distance("blue", {test: ["turquoise",.25,{method:colorDistance}]})).toBeLessThanOrEqual(.25);
+    expect(operators.$distance("blue", {test: ["red",.01,{method:colorDistance}]})).toBe(undefined);
+    expect(operators.$distance("blue", {test: [1,.01,{method:colorDistance}]})).toBe(undefined);
+})
+
 
 test("$isOdd",() => {
     expect(operators.$isOdd(1, {test: true})).toBe(1);

@@ -37,20 +37,29 @@ let count = 0,
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
+(new Benchmark.Suite).add("get primitive for async uncached",() => {
+    db.cache.delete("async");
+    const value = db.get("async");
+    if(value!==1) throw new Error("value should be 1");
+    db.cache.delete("async");
+}).on('cycle', async (event) => {
+    log(event,1);
+}).run({});
 /*(new Benchmark.Suite).add("get primitive for sync",() => {
     db.get("sync");
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});*/
-(new Benchmark.Suite).add("index sync",() => {
+(new Benchmark.Suite).add("index sync",async () => { // should be sync, but bug in lmdb itself
     if(count>maxCount) return;
-    db.putSync(null,{name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
+    await db.putSync(null,{name:"joe",address:{city:"Albany",state:"NY"},"#":`TestObject@${count++}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
 (new Benchmark.Suite).add("index async",async () => {
-    if(count<0) { count++;  return; }
-    await db.put(null,{name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count--}`});
+    //if(count<0) { count++;  return; }
+    if(count>maxCount) return;
+    await db.put(null,{name:"bill",address:{city:"Seattle",state:"WA"},"#":`TestObject@${count++}`});
 }).on('cycle', async (event) => {
     log(event,1);
 }).run({});
@@ -184,6 +193,9 @@ let count = 0,
             console.log("Albany range length:",[...db.getRangeFromIndex({address:{city:"Albany"}})].length);
             console.log("literal and function length:",[...db.getRangeFromIndex({name:"joe",address:{city:(value) => value==="Albany" ? value : undefined}},null,null,{fulltext:true})].length);
             console.log("Full range length:",[...await db.getRangeFromIndex({name:"joe"})].length);
+            console.log("Record Count:",[...await db.getRange()].length);
+            console.log("Value Index Size:",[...await db.valueIndex.getRange()].length);
+            console.log("Property Index Size:",[...await db.propertyIndex.getRange()].length);
         })
         .run({} );
 //},10000)

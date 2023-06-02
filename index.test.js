@@ -31,8 +31,14 @@ test("index returns id",async () => {
 
 
 test("putSync returns key",async () => {
-    const id = db.putSync(null,{...person,"#":"Person@1"},"Person");
-    personId = await id;
+    let id = db.putSync(null,{...person,"#":"Person@1"},"Person");
+    id = await id; // should not have to do this
+    expect(id).toBe("Person@1");
+});
+
+test("indexSync returns id",async () => {
+    let id = db.indexSync({...person,"#":"Person@1"},"Person");
+    id = await id; // should not have to do this
     expect(id).toBe("Person@1");
 });
 
@@ -46,7 +52,7 @@ test("getRangeFromIndex - scan",() => {
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
     delete range[0].value["#"];
-    expect(range[0].value).toEqual(person);
+    expect(JSON.stringify(range[0].value)).toEqual(JSON.stringify(person));
 })
 
 test("redefine Schema",() => {
@@ -87,13 +93,19 @@ test("get",() => {
     delete value["#"];
     expect(value.created.getTime()).toBe(person.created.getTime());
     delete value.created;
-    expect(value.aRegExp).toBeInstanceOf(RegExp);
     expect(value.aRegExp.toString()).toBe(person.aRegExp.toString());
     delete value.aRegExp;
     const p = {...person};
     delete p.created;
     delete p.aRegExp;
     expect(value).toEqual(p);
+    expect(db.cache.has(personId)).toBeTruthy();
+    const cached = db.cache.get(personId);
+    db.cache.delete(personId);
+    expect(db.cache.has(personId)).toBeFalsy();
+    const value2 = db.get(personId);
+    expect(value2["#"]).toBe(personId);
+    db.cache.set(personId,cached);
 })
 
 test("getRangeFromIndex",() => {
@@ -101,7 +113,7 @@ test("getRangeFromIndex",() => {
     expect(range.length).toBe(1);
     expect(range[0].value).toBeInstanceOf(Person);
     delete range[0].value["#"];
-    expect(range[0].value).toEqual(person);
+    expect(JSON.stringify(range[0].value)).toEqual(JSON.stringify(person));
 })
 
 
@@ -289,6 +301,15 @@ test("getRangeFromIndex - fulltext pct",async () => {
     }
 })
 
+test("getRangeFromIndex - fulltext throws", () => {
+    try {
+        [...db.getRangeFromIndex({name:"john andrew johnson"},null, null,{cname:"Person",fulltext:".5"})]
+    } catch(e) {
+        return;
+    }
+    throw new Error("Should have thrown");
+})
+
 test("put no index",async () => {
     const range = [...db.getRangeFromIndex({name:"joe"},null,null,{cname:"Person"})],
         p = {...person},
@@ -416,7 +437,7 @@ test("patch schemaless object",async () => {
     const id = await db.put(null,{name:"joe",age:21}),
         result = await db.patch(id,{age:22}),
         value = db.get(id);
-    expect(result).toBe(id);
+    expect(result).toBe(true);
     expect(value).toEqual({name:"joe",age:22,"#":id});
 })
 

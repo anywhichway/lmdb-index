@@ -1,5 +1,9 @@
+import {intersection,union} from "array-set-ops";
 import {DONE} from "lmdb-query";
 import {ToWords} from "to-words";
+import {distance} from "fastest-levenshtein";
+const colorParse = (await import("color-parse")).default;
+const levenshteinDistance = distance;
 const toWords = new ToWords();
 
 //soundex from https://gist.github.com/shawndumas/1262659
@@ -14,6 +18,134 @@ const validateLuhn = num => {
     let sum = arr.reduce((acc, val, i) => (i % 2 !== 0 ? acc + val : acc + ((val * 2) % 9) || 9), 0);
     sum += lastDigit;
     return sum % 10 === 0;
+}
+
+var STOPWORDS = [
+    'a', 'about', 'after', 'ala', 'all', 'also', 'am', 'an', 'and', 'another', 'any', 'are',
+    'around','as', 'at', 'be',
+    'because', 'been', 'before', 'being', 'between', 'both', 'but', 'by', 'came', 'can',
+    'come', 'could', 'did', 'do', 'each', 'for', 'from', 'get', 'got', 'has', 'had',
+    'he', 'have', 'her', 'here', 'him', 'himself', 'his', 'how', 'i', 'if', 'iff', 'in',
+    'include', 'into',
+    'is', 'it', 'like', 'make', 'many', 'me', 'might', 'more', 'most', 'much', 'must',
+    'my', 'never', 'now', 'of', 'on', 'only', 'or', 'other', 'our', 'out', 'over',
+    'said', 'same', 'see', 'should', 'since', 'some', 'still', 'such', 'take', 'than',
+    'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those',
+    'through', 'to', 'too', 'under', 'up', 'very', 'was', 'way', 'we', 'well', 'were',
+    'what', 'where', 'which', 'while', 'who', 'with', 'would', 'you', 'your'];
+
+const tokenize = (value,isObject) => (value.replace(new RegExp(`[^A-Za-z0-9\\s${isObject ? "\:" : ""}]`,"g"),"").replace(/  +/g," ").toLowerCase().split(" ").reduce((tokens,token) => {
+    const value = parseFloat(token);
+    isNaN(value) ? tokens.push(token) : tokens.push(...toWords.convert(token).split(" "));
+    return tokens;
+},[]));
+
+const addToDictionary = (stringOrArray,dictionary) => {
+    const words = Array.isArray(stringOrArray) ? stringOrArray : tokenize(stringOrArray).filter(word => !STOPWORDS.includes(word));
+    words.forEach((word) => {
+        dictionary[word] ||= 0;
+        dictionary[word]++;
+    });
+    return words;
+}
+
+const _stringstoVectors = ({dictionary,normalize},...tokenLists) => {
+    const vectors = [],
+        maximums = [];
+    Object.entries(dictionary).forEach(([token]) => {
+        tokenLists.forEach((tokenList,i) => {
+            vectors[i] ||= {};
+            vectors[i][token] ||= 0;
+            if(tokenList.includes(token)) {
+                vectors[i][token]++;
+            }
+            maximums[i] = Math.max(maximums[i]|| 0,vectors[i][token]);
+        });
+    });
+    return vectors.map((vector,i) => Object.values(vector).map((value) => value/ (normalize ? maximums[i] : 1)));
+}
+
+const stringsToVectors = (options,...tokenizedStrings) => {
+    const dictionary = {};
+    return _stringstoVectors({dictionary,...options},...tokenizedStrings.map(tokens => addToDictionary(tokens,dictionary)));
+}
+
+const colorsToVectors = (options,...colors) => {
+    return colors.map(color => {
+        if(typeof(color) !== "string") throw new TypeError("Color must be a string");
+        let array;
+        const parsed = colorParse(color.toLowerCase());
+        if(parsed?.space === "rgb") {
+            array = [...parsed.values,parsed.alpha]
+        }
+        return array ? array.map((v,i) => i<=2 ? v / 255 : v) : null;
+    })
+}
+
+function colorDistance(a, b) {
+    return euclidianDistance(a,b,{normalize:false,vectorize:colorsToVectors});
+}
+
+function euclidianDistance(a, b,{normalize,vectorize=stringsToVectors}) {
+    if(!Array.isArray(a) || !Array.isArray(b)) {
+        if(Array.isArray(a) || Array.isArray(b)) throw new TypeError("Cannot compute Euclidean distance between array and non-array values");
+        [a,b] = vectorize({normalize},a,b);
+    }
+    return Math.sqrt(a.map((x, i) => {
+        if(typeof(x) !== "number" || typeof(b[i]) !== "number") throw new TypeError("Cannot compute Euclidean distance between non-numeric values");
+        return Math.abs( x - b[i] ) ** 2  // square the difference
+    }).reduce((sum, now) => sum + now)) // sum
+}
+
+function manhattanDistance(a, b,{normalize,vectorize=stringsToVectors}={}) {
+    if(!Array.isArray(a) || !Array.isArray(b)) {
+        if(Array.isArray(a) || Array.isArray(b)) throw new TypeError("Cannot compute Manhattan distance between array and non-array values");
+        [a,b] = vectorize({normalize},a,b);
+    }
+    return a.map((x, i) => {
+        if(typeof(x) !== "number" || typeof(b[i]) !== "number") throw new TypeError("Cannot compute Manhattan distance between non-numeric values")
+        return Math.abs(x - b[i])
+    }).reduce((sum, now) => sum + now)
+}
+
+function jaccardDistance(a, b) {
+    const typea = typeof(a),
+        typeb = typeof(b);
+    if(typea==="string") {
+        a = tokenize(a).filter(word => !STOPWORDS.includes(word));
+    }
+    if(typeb==="string") {
+        b = tokenize(b).filter(word => !STOPWORDS.includes(word));
+    }
+    if(!Array.isArray(a) || !Array.isArray(b)) {
+        throw new TypeError("Cannot compute Jaccard distance between non-array values");
+    }
+    const i = intersection(a, b),
+        u = union(a, b);
+    return 1 - (i.length / u.length);
+}
+
+function cosineDistance(a, b) {
+    const typea = typeof(a),
+        typeb = typeof(b);
+    if(a==null || b==null) {
+        throw new TypeError("Cannot compute cosine distance between null values");
+    }
+    if(typea!==typeb) {
+        throw new TypeError("Cannot compute cosine distance between different types");
+    }
+    if(typea==="string") {
+        const dictionary = {};
+        [a,b] = stringsToVectors({dictionary},addToDictionary(a,dictionary),addToDictionary(b,dictionary));
+    }
+    if(!Array.isArray(a) || !Array.isArray(b)) {
+        throw new TypeError("Cannot compute cosine distance between non-array values");
+    }
+    const dotProduct = a.map((x, i) => a[i] * b[i]).reduce((sum, now) => sum + now);
+    if(dotProduct===0) return 1;
+    const magnitudeA = Math.sqrt(a.map(x => x ** 2).reduce((sum, now) => sum + now))
+    const magnitudeB = Math.sqrt(b.map(x => x ** 2).reduce((sum, now) => sum + now))
+    return 1 - (dotProduct / (magnitudeA * magnitudeB))
 }
 
 const operators = {
@@ -195,6 +327,28 @@ const operators = {
             _test = typeof(test)==="number" ? toWords.convert(test) : test;
         return typeof(_right)==="string" && typeof(_test)==="string" && soundex(_right)===soundex(_test) ? right : undefined
     },
+    $distance(right, {test},throws) { // trap only used in testing
+        let _right = right,_test = test,_compare,_options;
+        if(Array.isArray(right)) {
+            _right = right[0];
+            _compare = right[1];
+            _options = right[2]||{};
+        } else {
+            _test = test[0];
+            _compare = test[1];
+            _options = test[2]||{};
+        }
+        try {
+            const {method=typeof(_test)==="string" ? levenshteinDistance : euclidianDistance,vectorize} = _options,
+                distance = method(_right,_test,{normalize:_compare < 1 ? true : false,vectorize}),
+                result = _compare<1 ? distance/Math.max(_right.length,_test.length) : distance;
+            if(result<=_compare) {
+                return result;
+            }
+        } catch(e) {
+            if(throws) throw e;
+        }
+    },
 
     $add(right, {test}) {
         return right+test[0]===test[1] ? right : undefined
@@ -277,4 +431,4 @@ const operators = {
 */
 }
 
-export {operators as default,operators,DONE}
+export {operators as default,operators,DONE,STOPWORDS,tokenize,jaccardDistance,euclidianDistance,manhattanDistance,cosineDistance,levenshteinDistance,colorDistance,colorsToVectors,stringsToVectors}

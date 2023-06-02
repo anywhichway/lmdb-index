@@ -1,8 +1,10 @@
 # lmdb-index
 
-- object indexing for LMDB,
-- index based queries using literals, functions, and regular expressions,
+- object indexing for [LMDB](https://github.com/kriszyp/lmdb-js),
+- index and vector based queries using literals, functions, and regular expressions,
 - over 50 pre-built functions for use in queries, e.g. `$lte`, `$echoes` (soundex), `$includes`,
+- Levenshtein, Euclidean, Manhattan, Cosine, Color distance queries using `$distance`,
+- fulltext indexing and queries,
 - automatic id generation,
 - instantiation of returned objects as instances of their original classes,
 - copy, move, and patch operations,
@@ -10,17 +12,13 @@
 
 This is a mid-level API. For the highest level LMDB object query API see [lmdb-oql](https://github.com/anywhichway/lmdb-oql).
 
-This is BETA software. The API is stable and unit test coverage exceeds 99%.
-
-From an internal development perspective, v0.11.3 is the final BETA release. We will hold a few weeks for external feedback and then push v1.0.0. The first feature to be added after v1.0.0 will be vector support and similarity search
-
-A few stars on [GitHub](https://github.com/anywhichway/lmdb-index) or [documentation issues](https://github.com/anywhichway/lmdb-index/issues) would provide a little comfort regarding a v1.0.0 release :-).
-
 # Installation
 
 ```bash
 npm install lmdb-index --save
 ```
+
+You need to install `lmdb` separately, it is not a dependency of `lmdb-index`
 
 # Usage
 
@@ -57,8 +55,10 @@ if(id) {
     });
     [...db.getRangeFromIndex({
         [/name/]:"bill",
-        address:{city:"York"} // fulltext indexing turned on, partial matches returned so long as `valueMatch` is relaxed
-    },(value)=>value)].forEach((person) => {
+            address:{city:"York"} // fulltext indexing search turned on, partial matches returned so long as `valueMatch` is relaxed
+        },
+        (value)=>value) // relaxed value match
+    ].forEach((person) => {
         console.log(person)
     },null,{fulltext:true});
 }
@@ -120,7 +120,13 @@ Yields objects of the form `{key,value,count,version}` where `key` is the key of
 }
 ```
 
-The standard form for functions used in queries is `(value) => ... some code that returns a value or undefined or DONE`. These can be quite verbose, so over 60 pre-built functions are provided in the section [Operators](#operators).
+Literal value matches are by far the most performant. Function and RegExp value matches require an index scan across all values for a particular property. RegExp property matches require an index scan across all properties. Using both a RegExp property match and a function or RegExp value match is very expensive.
+
+Some query optimization is conducted, e.g. literal matches are processed first so that queries can fail early.
+
+Since indexed are sorted in ascending order, some research is being done into operator level optimizations for things like `$gt`, `$lt`.
+
+The standard form for functions used in queries is `(value) => ... some code that returns a value or undefined or DONE`. These can be quite verbose, so over 50 pre-built functions are provided in the section [Operators](#operators).
 
 `valueMatch` defaults to the same value as `indexMatch` because some of the processing required can't actually be done against indexes, underlying values must be retrieved. However, it can also be a function that accepts a candidate match and returns the candidate if is satisfies certain conditions or `undefined` if not. Or, it can be a different pattern matching object that is perhaps more restrictive.
 
@@ -231,6 +237,65 @@ Extends an LMDB database and any child databases it opens to have the `extension
 
 Returns a child database that has the extensions `copy`, `getRangeFromIndex`, `index`, `indexSync`, `move`, `patch` and modified behavior of `clearAsync`, clearSync`, `put`, `putSync`,`remove` and `removeSync`.
 
+## Vector Search
+
+This feature is in early BETA test. It is not recommended for production use.
+
+The current release supports vector comparisons on properties of objects using the operator `$distance`. 
+
+The vector comparison methods supported include:
+
+* [Cosine Similarity](https://en.wikipedia.org/wiki/Cosine_similarity)
+* [Euclidean Distance](https://en.wikipedia.org/wiki/Euclidean_distance)
+* [Manhattan Distance](https://en.wikipedia.org/wiki/Taxicab_geometry)
+* [Jaccard Distance](https://en.wikipedia.org/wiki/Jaccard_distance)
+* Color distance (see below)
+
+The operator `$distance` has the signature:
+
+`$distance([value:string|array,maxDistance:number,?method:function=typeof(value)==="string" ? levenshteinDistance : euclidianDistance])` - returns value the `string` is being compared to if the similarity is greater than or equal to `lowerBound`, otherwise `undefined`.
+
+Note: `levenshteinDistance` is not a vector comparison method, but is a common means of determining string similarity.
+
+If `maxDistance` is a fraction between 0 and .99999999999, Euclidean and Manhattan vectors are normalized by dividing each element in the vector by the maximum value in the vector. This can be used to make the distance comparable to the other methods, it will not change the actual similarity. And things that look like percentages are often easier to think about that absolute numbers, even if they are not really a percentage.
+
+The methods are:
+
+* `cosineDistance`
+* `euclideanDistance`
+* `manhattanDistance`
+* `jaccardDistance`
+* `colorDistance`
+
+For `cosineDistance`, `euclideanDistance` and `manhattanDistance`, if the `value` argument and property it is being compared to are strings, they will be tokenized using the same dictionary. If the `value` and target property are arrays of numbers, they will be used as is. Attempts to compare other combinations will return undefined.
+
+For `colorDistance`, uses `euclideanDistance` after doing some conversions adn validation. If the `value` argument and property are color names, hex values, `rgb(R,G,B)` or `rgba(R,G,B,A)`, they will be converted to RGBA vectors as `[R,G,B,A]`. `A` defaults to `1`. If they are 3 element numeric arrays an opacity of `1` will be added. If they are 4 element numeric arrays they will be used without change. Attempts to compare other combinations or arrays with invalid color values, i.e. numbers outside the range 0-256 for the first three elements and 0 to 1 for the 4th will return `undefined`.
+
+The methods can be imported from `lmdb-index/src/operators.js`.
+
+Although the methods will throw errors if called directly with the wrong types, the `$distance` operator will return `undefined` if the types are wrong. This is because JSON object properties are not strongly typed. If you want to ensure that the types are correct, you can use the `$type` operator to check the type before calling the `$distance` operator.
+
+For example:
+
+```javascript
+import {open} from "lmdb";
+import {withExtensions} from "lmdb-index";
+const db = withExtensions(open("test.db"));
+db.defineSchema(Object);
+await db.put(null,{type:"newspaper",headline:"Elon Musk's Boring Co to build high-speed airport link in Chicago"});
+await db.put(null,{type:"newspaper",headline:"Elon Musk's Boring Company to build high-speed Chicago airport link"});
+await db.put(null,{type:"newspaper",headline:"The quick brown fox really jumped over the lazy dog in Seattle"});
+
+for(const item of db.getRangeFromIndex({type:"newspaper",headline:$similarity(["Elon Musk's Boring Co to build high-speed O'Hare Airport link",.75,cosineDistance])})) {
+    console.log(item); // logs the first two items
+}
+for(const item of db.getRangeFromIndex({type:"newspaper",headline:$similarity(["Elon Musk's Boring Co to build high-speed airport link in Chicago",.99,cosineDistance])})) {
+    console.log(item); // logs only the first item
+}
+```
+
+Vector indexing is planned for a future release.
+
 ## Operators
 
 The following operators are supported in `indexMatch`, `valueMatch` and `select`.
@@ -240,6 +305,11 @@ The following operators are supported in `indexMatch`, `valueMatch` and `select`
 * `$and(...operatorResult)` - logical and
 * `$or(...operatorResult))` - logical or
 * `$not(...operatorResult))` - logical not
+
+Coming soon: 
+
+`$ior(...operatorResult))` - fuzzy matching inclusive or (more matches increases score)
+`$xor(...operatorResult))` - exclusive or
 
 #### Comparison
 
@@ -259,6 +329,7 @@ The following operators are supported in `indexMatch`, `valueMatch` and `select`
 * `$endsWith(string)` - property value ends with string
 * `$matches(RegExp)` - property value matches regular expression
 * `$echoes(string)` - property value sounds like the `string`
+* `$distance([value:string|array,upperBound:number,?method:function=levenshteinDistance)` - property value within `upperBound` distance to the `value`. See [Vector Search](#vector-search) for more information on `upperBound` and `method`.
 
 #### Arrays and Sets
 
@@ -312,23 +383,18 @@ Testing conducted with `jest`.
 
 File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
 ----------|---------|----------|---------|---------|------------------------
-All files       |   95.68 |    87.87 |   99.24 |   99.41 |
-lmdb-index     |   94.85 |    83.56 |   98.43 |   99.31 |
-index.js      |   94.85 |    83.56 |   98.43 |   99.31 | 275,306,570
-lmdb-index/src |     100 |    98.96 |     100 |     100 |
-operators.js  |     100 |    98.96 |     100 |     100 | 14,190
+All files       |   96.07 |    87.18 |     100 |   99.68 |
+lmdb-index     |   95.25 |    83.58 |     100 |   99.56 |
+index.js      |   95.25 |    83.58 |     100 |   99.56 | 300,564
+lmdb-index/src |   98.06 |    93.92 |     100 |     100 |
+operators.js  |   98.06 |    93.92 |     100 |     100 | 18-39,78-81,90-106,117,322,342
+
 
 # Release Notes (Reverse Chronological Order)
 
-During ALPHA and BETA, the following semantic versioning rules apply:
+2023-06-02 v1.0.0 Enhanced documentation. Fixed issue with `db.clearAsync` not awaiting all clears of child databases. Added `key` to entries returned by `db.getRangeFromIndex` to match documentation. Added `selector` as exported function. Enabled caching on primary and index databases. Added `$distance` operator.
 
-* The major version will be zero.
-* Breaking changes or feature additions will increment the minor version.
-* Bug fixes and documentation changes will increment the patch version.
-
-2023-06-01 v1.0.0 Fixed issue with `db.clearAsync` not awaiting all clears of child databases.
-
-2023-05-22 v0.11.3 Enhanced documentation. Added unit tests. Resolved the underlying issue related to `db.index`, it will no longer be deprecated.
+2023-05-22 v0.11.3 Enhanced documentation. Added unit tests. Resolved the underlying issue related to `db.index`, it will no longer be deprecated. Final BETA release.
 
 2023-05-21 v0.11.2 Enhanced documentation. Addressed/documented underlying issues with `lmdb`: https://github.com/kriszyp/lmdb-js/issues/235 and https://github.com/kriszyp/lmdb-js/issues/234.
 
@@ -342,7 +408,7 @@ During ALPHA and BETA, the following semantic versioning rules apply:
 
 2023-05-17 v0.9.1 Removed un-necessary files from npm package.
 
-2023-06-17 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
+2023-05-17 v0.9.0 Added unit tests. Addressed issue with RegExp and select. `$echoes` now handles numbers. Added some performance benchmarks.
 
 2023-05-16 v0.8.1 Added unit tests. Addressed issue with nested object indexing and matching keys with RegExp.
 
